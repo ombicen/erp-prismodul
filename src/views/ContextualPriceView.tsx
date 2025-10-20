@@ -1,10 +1,20 @@
-import React, { useEffect, useState } from 'react';
+'use client';
+
+import { useEffect, useState } from 'react';
 import { DataTable, Column } from '../components/DataTable';
 import { PanelLayout } from '../components/PanelLayout';
-import { supabase, ProductWithDetails, PricingRule } from '../lib/supabase';
 import { DollarSign, Plus } from 'lucide-react';
+import { api } from '../services/api';
 
-interface PriceRow extends ProductWithDetails {
+interface PriceRow {
+  id: string;
+  code: string;
+  name: string;
+  product_group_id: string;
+  purchase_price: number;
+  sync_status: string;
+  last_sync: string | null;
+  created_at: string;
   department_name?: string;
   product_group_name?: string;
   discount_type?: string;
@@ -34,38 +44,18 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
   const loadContextualProducts = async () => {
     setLoading(true);
     try {
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*')
-        .order('code');
+      const [productsData, rulesData] = await Promise.all([
+        api.products.getAll(),
+        api.pricingRules.getByContext(contextType, contextId),
+      ]);
 
-      if (productsError) throw productsError;
+      const rulesMap = new Map(rulesData.map((r: any) => [r.target_id, r]));
 
-      const { data: rulesData } = await supabase
-        .from('pricing_rules')
-        .select('*')
-        .eq('context_type', contextType)
-        .eq('context_id', contextId);
-
-      const { data: groupsData } = await supabase
-        .from('product_groups')
-        .select('*');
-
-      const { data: deptData } = await supabase
-        .from('departments')
-        .select('*');
-
-      const groupsMap = new Map(groupsData?.map(g => [g.id, g]) || []);
-      const deptMap = new Map(deptData?.map(d => [d.id, d]) || []);
-      const rulesMap = new Map(rulesData?.map(r => [r.target_id, r]) || []);
-
-      const enrichedProducts = productsData?.map(p => {
-        const group = groupsMap.get(p.product_group_id);
-        const dept = group ? deptMap.get(group.department_id) : undefined;
+      const enrichedProducts = productsData.map((p: any) => {
         const rule = rulesMap.get(p.id);
 
         const discountValue = rule?.discount_value || 0;
-        const purchasePrice = Number(p.purchase_price) || 0;
+        const purchasePrice = p.purchase_price;
 
         let calculatedPrice = purchasePrice;
         if (rule?.discount_type === 'percentage') {
@@ -79,9 +69,16 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
           : 0;
 
         return {
-          ...p,
-          product_group_name: group?.name || '',
-          department_name: dept?.name || '',
+          id: p.id,
+          code: p.code,
+          name: p.name,
+          product_group_id: p.product_group_id,
+          purchase_price: purchasePrice,
+          sync_status: p.sync_status,
+          last_sync: p.last_sync,
+          created_at: p.created_at,
+          product_group_name: p.product_group?.name || '',
+          department_name: p.product_group?.department?.name || '',
           discount_type: rule?.discount_type || 'percentage',
           discount_value: discountValue,
           quantity_threshold: rule?.quantity_threshold || 0,
@@ -89,7 +86,7 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
           calculated_price: calculatedPrice,
           margin_percentage: marginPercentage,
         };
-      }) || [];
+      });
 
       setProducts(enrichedProducts);
     } catch (error) {
@@ -103,33 +100,30 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
     const product = products[rowIndex];
 
     if (['discount_type', 'discount_value', 'quantity_threshold', 'excluded'].includes(columnKey)) {
-      const { data: existingRule } = await supabase
-        .from('pricing_rules')
-        .select('id')
-        .eq('context_type', contextType)
-        .eq('context_id', contextId)
-        .eq('target_type', 'product')
-        .eq('target_id', product.id)
-        .maybeSingle();
+      try {
+        const rulesData = await api.pricingRules.getByContext(contextType, contextId);
+        const existingRule = rulesData.find((r: any) =>
+          r.target_type === 'product' && r.target_id === product.id
+        );
 
-      if (existingRule) {
-        await supabase
-          .from('pricing_rules')
-          .update({ [columnKey]: value })
-          .eq('id', existingRule.id);
-      } else {
-        await supabase
-          .from('pricing_rules')
-          .insert({
+        if (existingRule) {
+          await api.pricingRules.update(existingRule.id, { [columnKey]: value });
+        } else {
+          await api.pricingRules.create({
             context_type: contextType,
             context_id: contextId,
             target_type: 'product',
             target_id: product.id,
+            discount_type: 'percentage',
+            discount_value: 0,
             [columnKey]: value,
           });
-      }
+        }
 
-      loadContextualProducts();
+        loadContextualProducts();
+      } catch (error) {
+        console.error('Error updating pricing rule:', error);
+      }
     }
   };
 
@@ -163,6 +157,67 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
       label: 'Avdelning',
       width: '110px',
       sortable: true,
+    },
+    {
+      key: 'sync_status',
+      label: 'Synkstatus',
+      width: '140px',
+      render: (value, row) => {
+        const raw = (value ?? '').toString();
+        const status = raw.toLowerCase();
+        const map = {
+          green: {
+            badge: 'bg-green-100 text-green-700 ring-green-200',
+            dot: 'bg-green-600',
+          },
+          orange: {
+            badge: 'bg-amber-100 text-amber-700 ring-amber-200',
+            dot: 'bg-amber-600',
+          },
+          red: {
+            badge: 'bg-rose-100 text-rose-700 ring-rose-200',
+            dot: 'bg-rose-600',
+          },
+          gray: {
+            badge: 'bg-slate-100 text-slate-700 ring-slate-200',
+            dot: 'bg-slate-500',
+          },
+        } as const;
+
+        const colorKey = (
+          status === 'synced' || status === 'success' || status === 'ok'
+            ? 'green'
+            : status === 'pending' || status === 'in_progress' || status === 'queued' || status === 'warning'
+            ? 'orange'
+            : status === 'failed' || status === 'error' || status === 'unsynced'
+            ? 'red'
+            : 'gray'
+        ) as keyof typeof map;
+
+        const classes = map[colorKey];
+        const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+        const lastSync = row.last_sync
+          ? new Date(row.last_sync).toLocaleString('sv-SE', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '';
+
+        const tooltip = lastSync ? `Senast synk: ${lastSync}` : undefined;
+
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset ${classes.badge}`}
+            title={tooltip}
+          >
+            <span className={`h-2 w-2 rounded-full ${classes.dot}`} />
+            {label}
+          </span>
+        );
+      },
     },
     {
       key: 'purchase_price',

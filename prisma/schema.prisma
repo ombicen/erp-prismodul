@@ -1,0 +1,212 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id                String            @id @default(uuid())
+  name              String
+  code              String            @unique
+  created_at        DateTime          @default(now())
+  product_groups    ProductGroup[]
+  contract_products ContractProduct[]
+
+  @@map("departments")
+}
+
+model ProductGroup {
+  id                String            @id @default(uuid())
+  name              String
+  code              String            @unique
+  department_id     String
+  created_at        DateTime          @default(now())
+
+  department        Department        @relation(fields: [department_id], references: [id])
+  products          Product[]
+  contract_products ContractProduct[]
+
+  @@map("product_groups")
+}
+
+model Supplier {
+  id                String            @id @default(uuid())
+  name              String
+  code              String            @unique
+  created_at        DateTime          @default(now())
+
+  product_suppliers ProductSupplier[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id                    String            @id @default(uuid())
+  code                  String            @unique
+  name                  String
+  product_group_id      String
+  purchase_price        Decimal           @db.Decimal(10, 2)
+  primary_supplier_id   String?           // Selected supplier for this product
+  sync_status           String            @default("pending")
+  last_sync             DateTime?
+  created_at            DateTime          @default(now())
+
+  product_group         ProductGroup        @relation(fields: [product_group_id], references: [id])
+  suppliers             ProductSupplier[]
+  contract_products     ContractProduct[]
+  primary_supplier      ProductSupplier?    @relation("PrimarySupplier", fields: [primary_supplier_id], references: [id])
+
+  @@map("products")
+}
+
+model ProductSupplier {
+  id                String    @id @default(uuid())
+  product_id        String
+  supplier_id       String
+  base_price        Decimal   @default(0) @db.Decimal(10, 2)  // Baspris
+  freight_cost      Decimal   @default(0) @db.Decimal(10, 2)  // Frakt
+  discount_type     String    @default("%")       // "%" or "KR"
+  discount_value    Decimal   @default(0) @db.Decimal(10, 2)  // Rabattmängd
+  is_primary        Boolean   @default(false)
+  created_at        DateTime  @default(now())
+
+  product           Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  supplier          Supplier  @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  primary_for       Product[] @relation("PrimarySupplier")
+
+  @@map("product_suppliers")
+}
+
+model Contract {
+  id                     String            @id @default(uuid())
+  name                   String
+  valid_from             DateTime?
+  valid_to               DateTime?
+  status                 String            @default("draft")
+  exclude_from_campaigns Boolean           @default(false)
+  created_at             DateTime          @default(now())
+
+  contract_products      ContractProduct[]
+  contract_customers     ContractCustomer[]
+
+  @@map("contracts")
+}
+
+model ContractProduct {
+  id                 String   @id @default(uuid())
+  contract_id        String
+  product_type       String   // 'single', 'product_group', 'department', 'price_group'
+
+  // For single products
+  product_id         String?
+
+  // For product groups
+  product_group_id   String?
+
+  // For departments
+  department_id      String?
+
+  // For price groups (future)
+  price_group_id     String?
+
+  contract_price     Decimal  @db.Decimal(10, 2)
+  discount_percent   Decimal  @db.Decimal(5, 2)
+  quantity           Int      @default(1)
+  campaign_whitelist Boolean  @default(false)
+  valid_from         DateTime?
+  valid_to           DateTime?
+  created_at         DateTime @default(now())
+
+  contract           Contract      @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  product            Product?      @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_group      ProductGroup? @relation(fields: [product_group_id], references: [id], onDelete: Cascade)
+  department         Department?   @relation(fields: [department_id], references: [id], onDelete: Cascade)
+
+  @@map("contract_products")
+}
+
+model Customer {
+  id                 String             @id @default(uuid())
+  customer_number    String             @unique
+  name               String
+  contact_person     String?
+  email              String?
+  created_at         DateTime           @default(now())
+
+  contract_customers ContractCustomer[]
+
+  @@map("customers")
+}
+
+model ContractCustomer {
+  id              String   @id @default(uuid())
+  contract_id     String
+  customer_id     String
+  contact_person  String?
+  email           String?
+  added_date      DateTime @default(now())
+
+  contract        Contract @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  customer        Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@unique([contract_id, customer_id])
+  @@map("contract_customers")
+}
+
+model CustomerPriceGroup {
+  id          String    @id @default(uuid())
+  name        String
+  valid_from  DateTime?
+  valid_to    DateTime?
+  description String    @default("")
+  status      String    @default("draft")
+  created_at  DateTime  @default(now())
+
+  @@map("customer_price_groups")
+}
+
+model Campaign {
+  id         String    @id @default(uuid())
+  name       String
+  valid_from DateTime?
+  valid_to   DateTime?
+  status     String    @default("draft")
+  created_at DateTime  @default(now())
+
+  @@map("campaigns")
+}
+
+model OtherCost {
+  id         String   @id @default(uuid())
+  name       String   // e.g., "KMCT", "Tull", "Förpackning"
+  cost_type  String   @default("%")  // "%" or "KR"
+  cost_value Decimal  @db.Decimal(10, 2)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  @@map("other_costs")
+}
+
+model PricingRule {
+  id                 String   @id @default(uuid())
+  context_type       String
+  context_id         String
+  target_type        String
+  target_id          String
+  discount_type      String
+  discount_value     Decimal  @db.Decimal(10, 2)
+  quantity_threshold Int      @default(1)
+  excluded           Boolean  @default(false)
+  created_at         DateTime @default(now())
+
+  @@map("pricing_rules")
+}

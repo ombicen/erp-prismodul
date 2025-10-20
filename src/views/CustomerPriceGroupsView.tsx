@@ -1,11 +1,27 @@
-import React, { useEffect, useState } from 'react';
-import { DataTable, Column } from '../components/DataTable';
-import { supabase, CustomerPriceGroup } from '../lib/supabase';
+'use client';
+
+import { useEffect, useState, useMemo } from 'react';
+import { SpreadsheetGrid, GridColumn } from '../components/SpreadsheetGrid';
+import { PanelLayout } from '../components/PanelLayout';
+import { CustomerPriceGroupDetailsTabs } from '../components/CustomerPriceGroupDetailsTabs';
 import { Users } from 'lucide-react';
+import { api } from '../services/api';
+
+interface CustomerPriceGroup {
+  id: string;
+  name: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  description: string;
+  status: string;
+  created_at: string;
+}
 
 export function CustomerPriceGroupsView() {
   const [groups, setGroups] = useState<CustomerPriceGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedGroup, setSelectedGroup] = useState<CustomerPriceGroup | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   useEffect(() => {
     loadGroups();
@@ -14,13 +30,8 @@ export function CustomerPriceGroupsView() {
   const loadGroups = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('customer_price_groups')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setGroups(data || []);
+      const data = await api.customerPriceGroups.getAll();
+      setGroups(data);
     } catch (error) {
       console.error('Error loading customer price groups:', error);
     } finally {
@@ -28,103 +39,82 @@ export function CustomerPriceGroupsView() {
     }
   };
 
-  const formatDate = (date: string | null) => {
+  const formatDate = (date: string | Date | null) => {
     if (!date) return '-';
     return new Date(date).toLocaleDateString('sv-SE');
   };
 
-  const getStatusBadge = (status: string) => {
-    const colors = {
-      active: 'bg-green-100 text-green-800',
-      planned: 'bg-blue-100 text-blue-800',
-      expired: 'bg-slate-100 text-slate-800',
-    };
-    const labels = {
-      active: 'Aktiv',
-      planned: 'Planerad',
-      expired: 'Utgången',
-    };
-    return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${colors[status as keyof typeof colors] || colors.active}`}>
-        {labels[status as keyof typeof labels] || status}
-      </span>
-    );
-  };
+  const columns = useMemo<GridColumn[]>(() => [
+    {
+      field: 'name',
+      headerName: 'Kundprisgrupp',
+      width: 250,
+      editable: true,
+    },
+    {
+      field: 'description',
+      headerName: 'Kommentar / Beskrivning',
+      width: 350,
+      editable: true,
+      valueFormatter: (value) => value || '-',
+    },
+    {
+      field: 'valid_from',
+      headerName: 'Giltighet från',
+      width: 150,
+      editable: true,
+      type: 'date',
+      valueFormatter: (value) => formatDate(value),
+    },
+    {
+      field: 'valid_to',
+      headerName: 'Giltighet till',
+      width: 150,
+      editable: true,
+      type: 'date',
+      valueFormatter: (value) => formatDate(value),
+    },
+    {
+      field: 'id',
+      headerName: 'Antal produkter',
+      width: 150,
+      type: 'number',
+      editable: false,
+      cellRenderer: () => '0',
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 140,
+      editable: false,
+      fixed: true,
+      cellRenderer: (value) => {
+        const status = value;
+        const labels: Record<string, string> = {
+          active: 'Aktiv',
+          planned: 'Planerad',
+          expired: 'Utgången',
+        };
+        return labels[status] || status;
+      },
+    },
+  ], []);
 
-  const columns: Column<CustomerPriceGroup>[] = [
-    {
-      key: 'name',
-      label: 'Kundprisgrupp',
-      width: '250px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="font-medium text-slate-900">{value}</span>
-      ),
-    },
-    {
-      key: 'description',
-      label: 'Kommentar / Beskrivning',
-      width: '300px',
-      editable: true,
-      render: (value) => (
-        <span className="text-slate-600 italic">{value || '-'}</span>
-      ),
-    },
-    {
-      key: 'valid_from',
-      label: 'Giltighet från',
-      width: '130px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="text-slate-700">{formatDate(value)}</span>
-      ),
-    },
-    {
-      key: 'valid_to',
-      label: 'Giltighet till',
-      width: '130px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="text-slate-700">{formatDate(value)}</span>
-      ),
-    },
-    {
-      key: 'id',
-      label: 'Antal produkter',
-      width: '130px',
-      align: 'right',
-      render: () => (
-        <span className="text-slate-600">0</span>
-      ),
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      width: '100px',
-      sortable: true,
-      render: (value) => getStatusBadge(value),
-    },
-  ];
-
-  const handleCellEdit = async (rowIndex: number, columnKey: string, value: any) => {
-    const group = groups[rowIndex];
+  const handleCellValueChanged = async (rowId: string, field: string, newValue: any) => {
     try {
-      const { error } = await supabase
-        .from('customer_price_groups')
-        .update({ [columnKey]: value })
-        .eq('id', group.id);
+      await api.customerPriceGroups.update(rowId, { [field]: newValue });
 
-      if (error) throw error;
-
-      setGroups(prev => prev.map((g, i) =>
-        i === rowIndex ? { ...g, [columnKey]: value } : g
+      setGroups(prev => prev.map(g =>
+        g.id === rowId ? { ...g, [field]: newValue } : g
       ));
     } catch (error) {
       console.error('Error updating customer price group:', error);
     }
+  };
+
+  const handleCellClick = (row: CustomerPriceGroup, field: string) => {
+    setSelectedGroup(row);
+    setIsDetailsOpen(true);
   };
 
   if (loading) {
@@ -138,7 +128,7 @@ export function CustomerPriceGroupsView() {
     );
   }
 
-  return (
+  const mainPanel = (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -160,14 +150,61 @@ export function CustomerPriceGroupsView() {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <DataTable
+        <SpreadsheetGrid
           columns={columns}
           data={groups}
-          keyExtractor={(row) => row.id}
-          onCellEdit={handleCellEdit}
-          filterRow={true}
+          height="calc(100vh - 180px)"
+          onCellValueChanged={handleCellValueChanged}
+          onCellClicked={handleCellClick}
         />
       </div>
     </div>
+  );
+
+  const detailsPanel = selectedGroup && (
+    <div className="flex flex-col h-full">
+      {/* Price Group Info Header */}
+      <div className="p-4 border-b border-slate-200 bg-slate-50">
+        <div className="space-y-2">
+          <div>
+            <h3 className="text-xs font-medium text-slate-500">Kundprisgrupp</h3>
+            <p className="text-sm font-semibold text-slate-900">{selectedGroup.name}</p>
+          </div>
+          <div>
+            <h3 className="text-xs font-medium text-slate-500">Beskrivning</h3>
+            <p className="text-xs text-slate-900">{selectedGroup.description || '-'}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <h3 className="text-xs font-medium text-slate-500">Giltighet från</h3>
+              <p className="text-xs text-slate-900">{formatDate(selectedGroup.valid_from)}</p>
+            </div>
+            <div>
+              <h3 className="text-xs font-medium text-slate-500">Giltighet till</h3>
+              <p className="text-xs text-slate-900">{formatDate(selectedGroup.valid_to)}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs Section */}
+      <div className="flex-1 overflow-hidden">
+        <CustomerPriceGroupDetailsTabs
+          priceGroupId={selectedGroup.id}
+          priceGroupName={selectedGroup.name}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <PanelLayout
+      mainPanel={mainPanel}
+      detailsPanel={detailsPanel}
+      isDetailsOpen={isDetailsOpen}
+      isBottomOpen={false}
+      onCloseDetails={() => setIsDetailsOpen(false)}
+      onCloseBottom={() => {}}
+    />
   );
 }

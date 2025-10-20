@@ -1,3 +1,28 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ReactGrid full width override */
+.reactgrid {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.reactgrid-content {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* Make ReactGrid rows clickable */
+.reactgrid .rg-row:not(.rg-header-row):not([data-row-id="filter"]) {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.reactgrid .rg-row:not(.rg-header-row):not([data-row-id="filter"]):hover {
+  background-color: #f8fafc !important;
+}
+
+.reactgrid .rg-row:not(.rg-header-row):not([data-row-id="filter"]):active {
+  background-color: #f1f5f9 !important;
+}

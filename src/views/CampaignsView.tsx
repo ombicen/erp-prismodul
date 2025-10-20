@@ -1,11 +1,26 @@
-import React, { useEffect, useState } from 'react';
-import { DataTable, Column } from '../components/DataTable';
-import { supabase, Campaign } from '../lib/supabase';
+'use client';
+
+import { useEffect, useState, useMemo } from 'react';
+import { SpreadsheetGrid, GridColumn } from '../components/SpreadsheetGrid';
+import { PanelLayout } from '../components/PanelLayout';
+import { CampaignDetailsTabs } from '../components/CampaignDetailsTabs';
 import { Megaphone } from 'lucide-react';
+import { api } from '../services/api';
+
+interface Campaign {
+  id: string;
+  name: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  status: string;
+  created_at: string;
+}
 
 export function CampaignsView() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   useEffect(() => {
     loadCampaigns();
@@ -14,13 +29,8 @@ export function CampaignsView() {
   const loadCampaigns = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setCampaigns(data || []);
+      const data = await api.campaigns.getAll();
+      setCampaigns(data);
     } catch (error) {
       console.error('Error loading campaigns:', error);
     } finally {
@@ -28,94 +38,75 @@ export function CampaignsView() {
     }
   };
 
-  const formatDate = (date: string | null) => {
+  const formatDate = (date: string | Date | null) => {
     if (!date) return '-';
     return new Date(date).toLocaleDateString('sv-SE');
   };
 
-  const getStatusBadge = (status: string) => {
-    const colors = {
-      active: 'bg-green-100 text-green-800',
-      planned: 'bg-blue-100 text-blue-800',
-      expired: 'bg-slate-100 text-slate-800',
-    };
-    const labels = {
-      active: 'Aktiv',
-      planned: 'Planerad',
-      expired: 'Utgången',
-    };
-    return (
-      <span className={`px-2 py-1 rounded text-xs font-medium ${colors[status as keyof typeof colors] || colors.active}`}>
-        {labels[status as keyof typeof labels] || status}
-      </span>
-    );
-  };
+  const columns = useMemo<GridColumn[]>(() => [
+    {
+      field: 'name',
+      headerName: 'Kampanjnamn',
+      width: 300,
+      editable: true,
+    },
+    {
+      field: 'valid_from',
+      headerName: 'Giltighet från',
+      width: 150,
+      editable: true,
+      type: 'date',
+      valueFormatter: (value) => formatDate(value),
+    },
+    {
+      field: 'valid_to',
+      headerName: 'Giltighet till',
+      width: 150,
+      editable: true,
+      type: 'date',
+      valueFormatter: (value) => formatDate(value),
+    },
+    {
+      field: 'id',
+      headerName: 'Antal produkter',
+      width: 150,
+      type: 'number',
+      editable: false,
+      cellRenderer: () => '0',
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 140,
+      editable: false,
+      fixed: true,
+      cellRenderer: (value) => {
+        const status = value;
+        const labels: Record<string, string> = {
+          active: 'Aktiv',
+          planned: 'Planerad',
+          expired: 'Utgången',
+        };
+        return labels[status] || status;
+      },
+    },
+  ], []);
 
-  const columns: Column<Campaign>[] = [
-    {
-      key: 'name',
-      label: 'Kampanjnamn',
-      width: '300px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="font-medium text-slate-900">{value}</span>
-      ),
-    },
-    {
-      key: 'valid_from',
-      label: 'Giltighet från',
-      width: '130px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="text-slate-700">{formatDate(value)}</span>
-      ),
-    },
-    {
-      key: 'valid_to',
-      label: 'Giltighet till',
-      width: '130px',
-      sortable: true,
-      editable: true,
-      render: (value) => (
-        <span className="text-slate-700">{formatDate(value)}</span>
-      ),
-    },
-    {
-      key: 'id',
-      label: 'Antal produkter',
-      width: '130px',
-      align: 'right',
-      render: () => (
-        <span className="text-slate-600">0</span>
-      ),
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      width: '100px',
-      sortable: true,
-      render: (value) => getStatusBadge(value),
-    },
-  ];
-
-  const handleCellEdit = async (rowIndex: number, columnKey: string, value: any) => {
-    const campaign = campaigns[rowIndex];
+  const handleCellValueChanged = async (rowId: string, field: string, newValue: any) => {
     try {
-      const { error } = await supabase
-        .from('campaigns')
-        .update({ [columnKey]: value })
-        .eq('id', campaign.id);
+      await api.campaigns.update(rowId, { [field]: newValue });
 
-      if (error) throw error;
-
-      setCampaigns(prev => prev.map((c, i) =>
-        i === rowIndex ? { ...c, [columnKey]: value } : c
+      setCampaigns(prev => prev.map(c =>
+        c.id === rowId ? { ...c, [field]: newValue } : c
       ));
     } catch (error) {
       console.error('Error updating campaign:', error);
     }
+  };
+
+  const handleCellClick = (row: Campaign, field: string) => {
+    setSelectedCampaign(row);
+    setIsDetailsOpen(true);
   };
 
   if (loading) {
@@ -129,7 +120,7 @@ export function CampaignsView() {
     );
   }
 
-  return (
+  const mainPanel = (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -151,14 +142,61 @@ export function CampaignsView() {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <DataTable
+        <SpreadsheetGrid
           columns={columns}
           data={campaigns}
-          keyExtractor={(row) => row.id}
-          onCellEdit={handleCellEdit}
-          filterRow={true}
+          height="calc(100vh - 180px)"
+          onCellValueChanged={handleCellValueChanged}
+          onCellClicked={handleCellClick}
         />
       </div>
     </div>
+  );
+
+  const detailsPanel = selectedCampaign && (
+    <div className="flex flex-col h-full">
+      {/* Campaign Info Header */}
+      <div className="p-4 border-b border-slate-200 bg-slate-50">
+        <div className="space-y-2">
+          <div>
+            <h3 className="text-xs font-medium text-slate-500">Kampanjnamn</h3>
+            <p className="text-sm font-semibold text-slate-900">{selectedCampaign.name}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <h3 className="text-xs font-medium text-slate-500">Giltighet från</h3>
+              <p className="text-xs text-slate-900">{formatDate(selectedCampaign.valid_from)}</p>
+            </div>
+            <div>
+              <h3 className="text-xs font-medium text-slate-500">Giltighet till</h3>
+              <p className="text-xs text-slate-900">{formatDate(selectedCampaign.valid_to)}</p>
+            </div>
+          </div>
+          <div>
+            <h3 className="text-xs font-medium text-slate-500">Status</h3>
+            <p className="text-xs text-slate-900">{selectedCampaign.status}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs Section */}
+      <div className="flex-1 overflow-hidden">
+        <CampaignDetailsTabs
+          campaignId={selectedCampaign.id}
+          campaignName={selectedCampaign.name}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <PanelLayout
+      mainPanel={mainPanel}
+      detailsPanel={detailsPanel}
+      isDetailsOpen={isDetailsOpen}
+      isBottomOpen={false}
+      onCloseDetails={() => setIsDetailsOpen(false)}
+      onCloseBottom={() => {}}
+    />
   );
 }
