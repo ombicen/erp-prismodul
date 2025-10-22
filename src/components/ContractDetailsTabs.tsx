@@ -13,6 +13,8 @@ interface ContractCustomer {
   added_date: string;
 }
 
+type ChangeType = 'percentage_surcharge' | 'kr_surcharge' | 'discount_percentage' | 'discount_kr' | 'fixed_price';
+
 interface ContractProduct {
   id: string;
   product_code: string;
@@ -20,9 +22,12 @@ interface ContractProduct {
   product_type: 'single' | 'product_group' | 'department' | 'price_group'; // Type of product entry
   product_group_name?: string; // If it's a group
   department_name?: string; // If it's a department
-  contract_price?: number; // Only for single products
-  discount_type: '%' | 'KR'; // For categories: type of discount
-  discount_value: number; // For single: %, for categories: % or KR based on discount_type
+  purchase_price?: number; // Inköpspris (purchase price for single products)
+  slutpris?: number; // Slutpris (final supplier price including surcharges for single products)
+  change_type: ChangeType; // Type of price change
+  change_value: number; // Value for the change (%, kr, or fixed price)
+  margin_percentage?: number; // TG (täckningsgrad)
+  net_price?: number; // Final calculated price (Summa)
   quantity: number;
   valid_from: string;
   valid_to: string;
@@ -44,7 +49,7 @@ export function ContractDetailsTabs({
   excludeFromCampaigns,
   onToggleExcludeFromCampaigns
 }: ContractDetailsTabsProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('customers');
+  const [activeTab, setActiveTab] = useState<TabType>('products');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalProductTab, setModalProductTab] = useState<'single' | 'product_group' | 'department'>('single');
@@ -75,9 +80,12 @@ export function ContractDetailsTabs({
       product_code: 'P-001',
       product_name: 'Widget Premium',
       product_type: 'single',
-      contract_price: 150.00,
-      discount_type: '%',
-      discount_value: 10,
+      purchase_price: 80.00,
+      slutpris: 100.00,
+      change_type: 'discount_percentage',
+      change_value: 10,
+      margin_percentage: 33.3,
+      net_price: 90.00,
       quantity: 100,
       valid_from: '2024-01-01',
       valid_to: '2024-12-31',
@@ -89,8 +97,8 @@ export function ContractDetailsTabs({
       product_name: 'Elektronik (Varugrupp)',
       product_type: 'product_group',
       product_group_name: 'Elektronik',
-      discount_type: '%',
-      discount_value: 15,
+      change_type: 'discount_percentage',
+      change_value: 15,
       quantity: 1,
       valid_from: '2024-01-01',
       valid_to: '2024-12-31',
@@ -102,8 +110,8 @@ export function ContractDetailsTabs({
       product_name: 'IT-avdelningen (Avdelning)',
       product_type: 'department',
       department_name: 'IT',
-      discount_type: 'KR',
-      discount_value: 50,
+      change_type: 'discount_kr',
+      change_value: 50,
       quantity: 1,
       valid_from: '2024-01-01',
       valid_to: '2024-12-31',
@@ -181,6 +189,107 @@ export function ContractDetailsTabs({
     ));
   };
 
+  const toNumber = (value: any, fallback = 0) => {
+    if (value == null || value === '') return fallback;
+    const num = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+    return Number.isFinite(num) ? num : fallback;
+  };
+
+  const roundTo = (value: number, decimals: number) => {
+    const factor = Math.pow(10, decimals);
+    return Math.round(value * factor) / factor;
+  };
+
+  const handleProductCellValueChange = (rowId: string, field: string, rawValue: any) => {
+    setProducts(prev =>
+      prev.map(product => {
+        if (product.id !== rowId || product.product_type !== 'single') {
+          return product;
+        }
+
+        const purchasePrice = toNumber(product.purchase_price, 0);
+        const slutpris = toNumber(product.slutpris, 0);
+        const changeType = product.change_type;
+        let changeValue = toNumber(product.change_value, 0);
+        let marginPercentage = toNumber(product.margin_percentage, 0);
+        let netPrice = toNumber(product.net_price, 0);
+
+        if (field === 'change_value') {
+          changeValue = toNumber(rawValue, changeValue);
+          // Recalculate net_price based on change_type
+          // Påslag beräknas på inköpspriset (ökar priset)
+          // Rabatter beräknas på slutpriset (minskar priset)
+          if (changeType === 'percentage_surcharge') {
+            // % Påslag: beräkna på inköpspris, lägg till på slutpris
+            const surcharge = purchasePrice * (changeValue / 100);
+            netPrice = slutpris + surcharge;
+          } else if (changeType === 'kr_surcharge') {
+            netPrice = slutpris + changeValue;
+          } else if (changeType === 'discount_percentage') {
+            netPrice = slutpris * (1 - changeValue / 100);
+          } else if (changeType === 'discount_kr') {
+            netPrice = slutpris - changeValue;
+          } else if (changeType === 'fixed_price') {
+            netPrice = changeValue;
+          }
+          // Calculate TG from netPrice
+          marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
+        } else if (field === 'margin_percentage') {
+          marginPercentage = toNumber(rawValue, marginPercentage);
+          // Tillåt negativa värden för flexibilitet
+          const marginDenominator = 1 - marginPercentage / 100;
+          netPrice = marginDenominator !== 0 ? slutpris / marginDenominator : slutpris;
+
+          // Recalculate change_value based on the new netPrice
+          // Påslag = ökning baserat på inköpspris, Rabatt = minskning baserat på slutpris
+          if (changeType === 'percentage_surcharge') {
+            // % Påslag: beräkna som % av inköpspris
+            const surcharge = netPrice - slutpris;
+            changeValue = purchasePrice > 0 ? (surcharge / purchasePrice) * 100 : 0;
+          } else if (changeType === 'kr_surcharge') {
+            changeValue = netPrice - slutpris;
+          } else if (changeType === 'discount_percentage') {
+            changeValue = slutpris > 0 ? ((slutpris - netPrice) / slutpris) * 100 : 0;
+          } else if (changeType === 'discount_kr') {
+            changeValue = slutpris - netPrice;
+          } else if (changeType === 'fixed_price') {
+            changeValue = netPrice;
+          }
+        } else if (field === 'net_price') {
+          netPrice = toNumber(rawValue, netPrice);
+
+          // Recalculate change_value and margin
+          // Påslag = ökning baserat på inköpspris, Rabatt = minskning baserat på slutpris
+          if (changeType === 'percentage_surcharge') {
+            // % Påslag: beräkna som % av inköpspris
+            const surcharge = netPrice - slutpris;
+            changeValue = purchasePrice > 0 ? (surcharge / purchasePrice) * 100 : 0;
+          } else if (changeType === 'kr_surcharge') {
+            changeValue = netPrice - slutpris;
+          } else if (changeType === 'discount_percentage') {
+            changeValue = slutpris > 0 ? ((slutpris - netPrice) / slutpris) * 100 : 0;
+          } else if (changeType === 'discount_kr') {
+            changeValue = slutpris - netPrice;
+          } else if (changeType === 'fixed_price') {
+            changeValue = netPrice;
+          }
+
+          marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
+        } else {
+          // For other fields, just update directly
+          return { ...product, [field]: rawValue };
+        }
+
+        return {
+          ...product,
+          change_value: roundTo(changeValue, 2),
+          margin_percentage: roundTo(marginPercentage, 1),
+          net_price: roundTo(netPrice, 2),
+        };
+      })
+    );
+  };
+
   const productColumns: GridColumn[] = [
     {
       field: 'product_type',
@@ -231,59 +340,127 @@ export function ContractDetailsTabs({
       editable: false,
     },
     {
-      field: 'contract_price',
-      headerName: 'Avtalspris',
+      field: 'purchase_price',
+      headerName: 'Inköpspris',
       width: 120,
       type: 'number',
-      editable: true,
+      editable: false,
       cellRenderer: (value: any, row: any) => {
-        // Only show contract price for single products
-        if (row?.product_type !== 'single') {
+        // Only show for single products
+        if (row?.product_type !== 'single' || value == null) {
           return <span className="text-slate-400">-</span>;
         }
         return `${Number(value || 0).toFixed(2)} kr`;
       },
     },
     {
-      field: 'discount_type',
-      headerName: 'Rabatttyp',
-      width: 100,
-      editable: true,
+      field: 'slutpris',
+      headerName: 'Slutpris',
+      width: 120,
+      type: 'number',
+      editable: false,
       cellRenderer: (value: any, row: any) => {
-        // For single products, always show %
-        if (row?.product_type === 'single') {
-          return <span className="text-slate-600">%</span>;
+        // Only show for single products
+        if (row?.product_type !== 'single' || value == null) {
+          return <span className="text-slate-400">-</span>;
         }
-        // For categories, show editable dropdown
+        return `${Number(value || 0).toFixed(2)} kr`;
+      },
+    },
+    {
+      field: 'change_type',
+      headerName: 'Förändring',
+      width: 150,
+      editable: false,
+      cellRenderer: (value: any, row: any) => {
+        const changeTypes = {
+          percentage_surcharge: '% Påslag',
+          kr_surcharge: 'kr Påslag',
+          discount_percentage: '% Rabatt',
+          discount_kr: 'kr Rabatt',
+          fixed_price: 'Fast pris',
+        };
+
         return (
           <select
-            value={value || '%'}
+            value={value || 'discount_percentage'}
             onChange={(e) => {
-              setProducts(prev => prev.map(p =>
-                p.id === row?.id ? { ...p, discount_type: e.target.value as '%' | 'KR' } : p
-              ));
+              const newChangeType = e.target.value as ChangeType;
+              setProducts(prev => prev.map(p => {
+                if (p.id !== row?.id || p.product_type !== 'single') {
+                  return { ...p, change_type: newChangeType };
+                }
+
+                // Recalculate based on new change type
+                const purchasePrice = toNumber(p.purchase_price, 0);
+                const slutpris = toNumber(p.slutpris, 0);
+                const changeValue = toNumber(p.change_value, 0);
+                let netPrice = 0;
+
+                // Calculate net_price with new change type
+                if (newChangeType === 'percentage_surcharge') {
+                  const surcharge = purchasePrice * (changeValue / 100);
+                  netPrice = slutpris + surcharge;
+                } else if (newChangeType === 'kr_surcharge') {
+                  netPrice = slutpris + changeValue;
+                } else if (newChangeType === 'discount_percentage') {
+                  netPrice = slutpris * (1 - changeValue / 100);
+                } else if (newChangeType === 'discount_kr') {
+                  netPrice = slutpris - changeValue;
+                } else if (newChangeType === 'fixed_price') {
+                  netPrice = changeValue;
+                }
+
+                const marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
+
+                return {
+                  ...p,
+                  change_type: newChangeType,
+                  net_price: roundTo(netPrice, 2),
+                  margin_percentage: roundTo(marginPercentage, 1),
+                };
+              }));
             }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
           >
-            <option value="%">%</option>
-            <option value="KR">KR</option>
+            <option value="percentage_surcharge">% Påslag</option>
+            <option value="kr_surcharge">kr Påslag</option>
+            <option value="discount_percentage">% Rabatt</option>
+            <option value="discount_kr">kr Rabatt</option>
+            <option value="fixed_price">Fast pris</option>
           </select>
         );
       },
     },
     {
-      field: 'discount_value',
-      headerName: 'Rabatt',
+      field: 'change_value',
+      headerName: 'Värde',
       width: 120,
       type: 'number',
       editable: true,
-      cellRenderer: (value: any, row: any) => {
-        if (row?.product_type === 'single') {
-          return `${value}%`;
-        }
-        const discountType = row?.discount_type || '%';
-        return discountType === '%' ? `${value}%` : `${Number(value).toFixed(2)} kr`;
+      valueFormatter: (value: any) => {
+        return value == null ? '-' : `${Number(value).toFixed(2)}`;
+      },
+    },
+    {
+      field: 'margin_percentage',
+      headerName: 'TG',
+      width: 90,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value: any) => {
+        return value == null ? '-' : `${Number(value).toFixed(1)}`;
+      },
+    },
+    {
+      field: 'net_price',
+      headerName: 'Summa',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value: any) => {
+        return value == null ? '-' : `${Number(value).toFixed(2)}`;
       },
     },
     {
@@ -376,8 +553,8 @@ export function ContractDetailsTabs({
   };
 
   const tabs = [
-    { id: 'customers' as TabType, label: 'Kunder', count: customers.length },
     { id: 'products' as TabType, label: 'Produkter', count: products.length },
+    { id: 'customers' as TabType, label: 'Kunder', count: customers.length },
   ];
 
   return (
@@ -414,7 +591,7 @@ export function ContractDetailsTabs({
 
       {/* Tab Header */}
       <div className="border-b border-slate-200 bg-white">
-        <div className="flex items-center justify-between px-4 py-2">
+        <div className="flex items-center justify-between">
           <div className="flex gap-1">
             {tabs.map((tab) => (
               <button
@@ -459,6 +636,7 @@ export function ContractDetailsTabs({
             data={products}
             height="100%"
             showFilter={true}
+            onCellValueChanged={handleProductCellValueChange}
           />
         )}
       </div>
@@ -487,47 +665,76 @@ export function ContractDetailsTabs({
             <div className="px-6 py-4">
               {/* Product Type Tabs (only show for products) */}
               {activeTab === 'products' && (
-                <div className="mb-4 flex gap-1 border-b border-slate-200">
+                <>
+                  <div className="mb-4 flex gap-1 border-b border-slate-200">
+                    <button
+                      onClick={() => {
+                        setModalProductTab('single');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'single'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Produkter
+                    </button>
+                    <button
+                      onClick={() => {
+                        setModalProductTab('product_group');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'product_group'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Varugrupper
+                    </button>
+                    <button
+                      onClick={() => {
+                        setModalProductTab('department');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'department'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Avdelningar
+                    </button>
+                  </div>
+
+                  {/* Add entire assortment button */}
                   <button
                     onClick={() => {
-                      setModalProductTab('single');
+                      // Add entire assortment as a single row
+                      const newAssortmentProduct: ContractProduct = {
+                        id: `assortment-${Date.now()}`,
+                        product_code: 'SORT-ALL',
+                        product_name: 'Hela sortimentet',
+                        product_type: 'department', // Using department type for entire assortment
+                        department_name: 'Hela sortimentet',
+                        change_type: 'discount_percentage',
+                        change_value: 0,
+                        quantity: 1,
+                        valid_from: new Date().toISOString().split('T')[0],
+                        valid_to: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
+                        campaign_whitelist: false,
+                      };
+                      setProducts([...products, newAssortmentProduct]);
+                      setIsModalOpen(false);
                       setSearchTerm('');
                     }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'single'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                    className="w-full mb-4 px-4 py-3 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
                   >
-                    Produkter
+                    <Plus className="w-4 h-4" />
+                    Lägg till hela sortimentet
                   </button>
-                  <button
-                    onClick={() => {
-                      setModalProductTab('product_group');
-                      setSearchTerm('');
-                    }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'product_group'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Varugrupper
-                  </button>
-                  <button
-                    onClick={() => {
-                      setModalProductTab('department');
-                      setSearchTerm('');
-                    }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'department'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Avdelningar
-                  </button>
-                </div>
+                </>
               )}
 
               <label className="block text-sm font-medium text-slate-700 mb-2">

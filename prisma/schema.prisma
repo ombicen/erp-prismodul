@@ -20,6 +20,7 @@ model Department {
   created_at        DateTime          @default(now())
   product_groups    ProductGroup[]
   contract_products ContractProduct[]
+  pricing_rules     PricingRule[]
 
   @@map("departments")
 }
@@ -34,6 +35,7 @@ model ProductGroup {
   department        Department        @relation(fields: [department_id], references: [id])
   products          Product[]
   contract_products ContractProduct[]
+  pricing_rules     PricingRule[]
 
   @@map("product_groups")
 }
@@ -56,6 +58,8 @@ model Product {
   product_group_id      String
   purchase_price        Decimal           @db.Decimal(10, 2)
   primary_supplier_id   String?           // Selected supplier for this product
+  varumärke             String?           // Brand
+  enhet                 String?           // Unit (e.g., "st", "kg", "m", "l")
   sync_status           String            @default("pending")
   last_sync             DateTime?
   created_at            DateTime          @default(now())
@@ -64,6 +68,8 @@ model Product {
   suppliers             ProductSupplier[]
   contract_products     ContractProduct[]
   primary_supplier      ProductSupplier?    @relation("PrimarySupplier", fields: [primary_supplier_id], references: [id])
+  product_surcharges    ProductSurcharge[]
+  pricing_rules         PricingRule[]
 
   @@map("products")
 }
@@ -197,16 +203,62 @@ model OtherCost {
 }
 
 model PricingRule {
-  id                 String   @id @default(uuid())
-  context_type       String
-  context_id         String
-  target_type        String
-  target_id          String
-  discount_type      String
-  discount_value     Decimal  @db.Decimal(10, 2)
-  quantity_threshold Int      @default(1)
-  excluded           Boolean  @default(false)
-  created_at         DateTime @default(now())
+  id                 String    @id @default(uuid())
+  context_type       String    // 'customer_price_group', 'contract', etc.
+  context_id         String    // ID of the price group, contract, etc.
+  product_type       String    @default("single")  // 'single', 'product_group', 'department', 'all'
+
+  // For single products
+  product_id         String?
+  product            Product?  @relation(fields: [product_id], references: [id])
+
+  // For product groups
+  product_group_id   String?
+  product_group      ProductGroup? @relation(fields: [product_group_id], references: [id])
+
+  // For departments
+  department_id      String?
+  department         Department? @relation(fields: [department_id], references: [id])
+
+  base_price         Decimal?  @db.Decimal(10, 2)
+  discount_type      String?   @default("%")  // "%" or "KR"
+  discount_value     Decimal?  @db.Decimal(10, 2)
+  margin_percentage  Decimal?  @db.Decimal(10, 2)
+  final_price        Decimal?  @db.Decimal(10, 2)
+  quantity_threshold Int       @default(1)
+  excluded           Boolean   @default(false)
+  valid_from         DateTime?
+  valid_to           DateTime?
+  created_at         DateTime  @default(now())
 
   @@map("pricing_rules")
+}
+
+model Surcharge {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  cost_type   String            @default("%")  // "%" or "KR"
+  cost_value  Decimal           @db.Decimal(10, 2)
+  scope_type  String            @default("local")  // "global" or "local"
+  is_active   Boolean           @default(true)
+  created_at  DateTime          @default(now())
+
+  product_surcharges ProductSurcharge[]
+
+  @@map("surcharges")
+}
+
+model ProductSurcharge {
+  id           String    @id @default(uuid())
+  surcharge_id String
+  product_id   String
+  is_active    Boolean   @default(true)
+  created_at   DateTime  @default(now())
+
+  surcharge    Surcharge @relation(fields: [surcharge_id], references: [id], onDelete: Cascade)
+  product      Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([surcharge_id, product_id])
+  @@map("product_surcharges")
 }

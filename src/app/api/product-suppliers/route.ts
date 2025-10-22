@@ -42,6 +42,57 @@ export async function GET(request: Request) {
   }
 }
 
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const {
+      product_id,
+      supplier_id,
+      base_price,
+      freight_cost = 0,
+      discount_type = '%',
+      discount_value = 0,
+    } = body;
+
+    if (!product_id || !supplier_id) {
+      return NextResponse.json({ error: 'product_id and supplier_id are required' }, { status: 400 });
+    }
+
+    const numericBasePrice = Number(base_price ?? 0);
+    const numericFreightCost = Number(freight_cost ?? 0);
+    const numericDiscountValue = Number(discount_value ?? 0);
+
+    const created = await prisma.productSupplier.create({
+      data: {
+        product_id,
+        supplier_id,
+        base_price: numericBasePrice,
+        freight_cost: numericFreightCost,
+        discount_type: discount_type === 'KR' ? 'KR' : '%',
+        discount_value: numericDiscountValue,
+      },
+      include: {
+        supplier: true,
+      },
+    });
+
+    return NextResponse.json({
+      id: created.id,
+      supplier_id: created.supplier_id,
+      supplier_name: created.supplier.name,
+      base_price: created.base_price.toNumber(),
+      freight_cost: created.freight_cost.toNumber(),
+      discount_type: created.discount_type,
+      discount_value: created.discount_value.toNumber(),
+      is_primary: created.is_primary,
+      created_at: created.created_at.toISOString(),
+    }, { status: 201 });
+  } catch (error) {
+    console.error('Error creating product supplier:', error);
+    return NextResponse.json({ error: 'Failed to create product supplier' }, { status: 500 });
+  }
+}
+
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();

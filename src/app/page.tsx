@@ -1,14 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Package, FileText, Users, Megaphone, BarChart3 } from 'lucide-react';
+import { Package, FileText, Users, Megaphone, BarChart3, DollarSign } from 'lucide-react';
 import { ProductsView } from '@/views/ProductsView';
 import { ContractsView } from '@/views/ContractsView';
 import { CustomerPriceGroupsView } from '@/views/CustomerPriceGroupsView';
 import { CampaignsView } from '@/views/CampaignsView';
 import { ContextualPriceView } from '@/views/ContextualPriceView';
+import { SurchargesView } from '@/views/SurchargesView';
 
-type View = 'products' | 'contracts' | 'customer-groups' | 'campaigns' | 'contextual-price';
+type View = 'products' | 'contracts' | 'customer-groups' | 'campaigns' | 'surcharges' | 'contextual-price';
 
 interface ContextualPriceContext {
   type: 'contract' | 'customer_price_group' | 'campaign';
@@ -25,6 +26,7 @@ export default function Home() {
     { id: 'contracts' as View, label: 'Avtal', icon: FileText },
     { id: 'customer-groups' as View, label: 'Kundprisgrupper', icon: Users },
     { id: 'campaigns' as View, label: 'Kampanjer', icon: Megaphone },
+    { id: 'surcharges' as View, label: 'Påslag', icon: DollarSign },
   ];
 
   const renderView = () => {
@@ -47,6 +49,8 @@ export default function Home() {
         return <CustomerPriceGroupsView />;
       case 'campaigns':
         return <CampaignsView />;
+      case 'surcharges':
+        return <SurchargesView />;
       default:
         return <ProductsView />;
     }

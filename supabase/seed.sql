@@ -15,6 +15,16 @@ INSERT INTO departments (id, name, code, created_at) VALUES
   ('33333333-3333-3333-3333-333333333333', 'Home & Garden', 'HOME', NOW() - INTERVAL '4 months'),
   ('44444444-4444-4444-4444-444444444444', 'Sports & Outdoors', 'SPORT', NOW() - INTERVAL '3 months'),
   ('55555555-5555-5555-5555-555555555555', 'Food & Beverages', 'FOOD', NOW() - INTERVAL '2 months');
+  ('66666666-6666-6666-6666-666666666666', 'Books & Media', 'BOOK', NOW() - INTERVAL '1 month'),
+  ('77777777-7777-7777-7777-777777777777', 'Toys & Games', 'TOYS', NOW() - INTERVAL '2 weeks'),
+  ('88888888-8888-8888-8888-888888888888', 'Health & Beauty', 'HLTH', NOW() - INTERVAL '3 weeks'),
+  ('99999999-9999-9999-9999-999999999999', 'Automotive', 'AUTO', NOW() - INTERVAL '1 week'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Office Supplies', 'OFFC', NOW() - INTERVAL '5 days'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Pet Supplies', 'PETS', NOW() - INTERVAL '3 days'),
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Jewelry', 'JEWL', NOW() - INTERVAL '2 days'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Musical Instruments', 'MUSC', NOW() - INTERVAL '1 day'),
+  ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'Baby Products', 'BABY', NOW() - INTERVAL '12 hours'),
+  ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'Garden & Outdoor', 'GARD', NOW() - INTERVAL '6 hours');
 
 -- Insert Product Groups
 INSERT INTO product_groups (id, name, code, department_id, created_at) VALUES
@@ -36,6 +46,25 @@ INSERT INTO product_groups (id, name, code, department_id, created_at) VALUES
   -- Food
   ('a5555555-5555-5555-5555-555555555551', 'Beverages', 'FOOD-BEV', '55555555-5555-5555-5555-555555555555', NOW() - INTERVAL '2 months'),
   ('a5555555-5555-5555-5555-555555555552', 'Snacks', 'FOOD-SNK', '55555555-5555-5555-5555-555555555555', NOW() - INTERVAL '2 months');
+  -- Books & Media
+  ('a6666666-6666-6666-6666-666666666661', 'Fiction', 'BOOK-FIC', '66666666-6666-6666-6666-666666666666', NOW() - INTERVAL '1 month'),
+  ('a6666666-6666-6666-6666-666666666662', 'Non-Fiction', 'BOOK-NON', '66666666-6666-6666-6666-666666666666', NOW() - INTERVAL '1 month'),
+  -- Toys & Games
+  ('a7777777-7777-7777-7777-777777777771', 'Board Games', 'TOYS-BRD', '77777777-7777-7777-7777-777777777777', NOW() - INTERVAL '2 weeks'),
+  ('a7777777-7777-7777-7777-777777777772', 'Action Figures', 'TOYS-ACT', '77777777-7777-7777-7777-777777777777', NOW() - INTERVAL '2 weeks'),
+  -- Health & Beauty
+  ('a8888888-8888-8888-8888-888888888881', 'Skincare', 'HLTH-SKN', '88888888-8888-8888-8888-888888888888', NOW() - INTERVAL '3 weeks'),
+  ('a8888888-8888-8888-8888-888888888882', 'Supplements', 'HLTH-SUP', '88888888-8888-8888-8888-888888888888', NOW() - INTERVAL '3 weeks'),
+  -- Automotive
+  ('a9999999-9999-9999-9999-999999999991', 'Car Care', 'AUTO-CARE', '99999999-9999-9999-9999-999999999999', NOW() - INTERVAL '1 week'),
+  -- Office Supplies
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', 'Stationery', 'OFFC-STAT', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', NOW() - INTERVAL '5 days'),
+  -- Pet Supplies
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 'Dog Food', 'PETS-DOG', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', NOW() - INTERVAL '3 days'),
+  -- Jewelry
+  ('cccccccc-cccc-cccc-cccc-ccccccccccc1', 'Rings', 'JEWL-RNG', 'cccccccc-cccc-cccc-cccc-cccccccccccc', NOW() - INTERVAL '2 days'),
+  -- Musical Instruments
+  ('dddddddd-dddd-dddd-dddd-ddddddddddd1', 'Guitars', 'MUSC-GTR', 'dddddddd-dddd-dddd-dddd-dddddddddddd', NOW() - INTERVAL '1 day');
 
 -- Insert Suppliers
 INSERT INTO suppliers (id, name, code, created_at) VALUES

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SpreadsheetGrid, GridColumn } from './SpreadsheetGrid';
 import { Plus, X } from 'lucide-react';
 
@@ -8,6 +8,7 @@ interface CustomerPriceGroup {
   id: string;
   group_name: string;
   price: number;
+  discount_type: '%' | 'KR';
   discount_percent: number;
   valid_from: string;
   valid_to: string;
@@ -18,6 +19,8 @@ interface Contract {
   contract_number: string;
   customer_name: string;
   price: number;
+  discount_type: '%' | 'KR';
+  discount_percent: number;
   quantity: number;
   valid_from: string;
   valid_to: string;
@@ -27,6 +30,7 @@ interface Campaign {
   id: string;
   campaign_name: string;
   campaign_price: number;
+  discount_type: '%' | 'KR';
   discount_percent: number;
   start_date: string;
   end_date: string;
@@ -50,6 +54,7 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       id: '1',
       group_name: 'VIP Kunder',
       price: 150.00,
+      discount_type: '%',
       discount_percent: 10,
       valid_from: '2024-01-01',
       valid_to: '2024-12-31',
@@ -58,6 +63,7 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       id: '2',
       group_name: 'Återförsäljare',
       price: 130.00,
+      discount_type: '%',
       discount_percent: 20,
       valid_from: '2024-01-01',
       valid_to: '2024-12-31',
@@ -70,6 +76,8 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       contract_number: 'AVT-2024-001',
       customer_name: 'Företag AB',
       price: 140.00,
+      discount_type: '%',
+      discount_percent: 15,
       quantity: 100,
       valid_from: '2024-01-01',
       valid_to: '2024-06-30',
@@ -81,6 +89,7 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       id: '1',
       campaign_name: 'Vår REA 2024',
       campaign_price: 99.00,
+      discount_type: '%',
       discount_percent: 25,
       start_date: '2024-03-01',
       end_date: '2024-03-31',
@@ -109,6 +118,52 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     { id: 'camp4', name: 'Julkampanj' },
   ];
 
+  // Compute price groups with sum values
+  const priceGroupsWithSum = useMemo(() => {
+    const result = priceGroups.map(pg => {
+      let sum: number;
+      if (pg.discount_type === '%') {
+        sum = pg.price * (1 - pg.discount_percent / 100);
+      } else {
+        // KR - fixed amount discount
+        sum = pg.price - pg.discount_percent;
+      }
+      return {
+        ...pg,
+        sum: sum,
+      };
+    });
+    console.log('priceGroupsWithSum recalculated:', result);
+    return result;
+  }, [priceGroups]);
+
+  const handlePriceGroupCellChange = (rowId: string, field: string, value: any) => {
+    setPriceGroups(prev => prev.map(pg => {
+      if (pg.id !== rowId) return pg;
+
+      // If sum is edited, recalculate discount based on discount type
+      if (field === 'sum') {
+        const newSum = Number(value);
+        const price = pg.price;
+
+        if (pg.discount_type === '%') {
+          // sum = price * (1 - discount/100)
+          // discount = (1 - sum/price) * 100
+          const newDiscount = price > 0 ? ((1 - newSum / price) * 100) : 0;
+          return { ...pg, discount_percent: Math.max(0, Math.min(100, newDiscount)) };
+        } else {
+          // KR - fixed amount discount
+          // sum = price - discount
+          // discount = price - sum
+          const newDiscount = price - newSum;
+          return { ...pg, discount_percent: Math.max(0, newDiscount) };
+        }
+      }
+
+      return { ...pg, [field]: value };
+    }));
+  };
+
   const priceGroupColumns: GridColumn[] = [
     {
       field: 'group_name',
@@ -125,12 +180,54 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
     },
     {
-      field: 'discount_percent',
-      headerName: 'Rabatt %',
+      field: 'discount_type',
+      headerName: 'Rabattyp',
       width: 100,
+      editable: false,
+      cellRenderer: (value: any, row: any) => {
+        return (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full h-full flex items-center"
+          >
+            <select
+              value={value || '%'}
+              onChange={(e) => {
+                const newType = e.target.value as '%' | 'KR';
+                setPriceGroups(prev => prev.map(p => {
+                  if (p.id === row?.id) {
+                    return { ...p, discount_type: newType };
+                  }
+                  return p;
+                }));
+              }}
+              className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="%">%</option>
+              <option value="KR">KR</option>
+            </select>
+          </div>
+        );
+      },
+      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+    },
+    {
+      field: 'discount_percent',
+      headerName: 'Rabatt',
+      width: 120,
       type: 'number',
       editable: true,
-      valueFormatter: (value) => `${value}%`,
+      valueFormatter: (value) => `${Number(value).toFixed(2)}`,
+    },
+    {
+      field: 'sum',
+      headerName: 'Summa',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
     },
     {
       field: 'valid_from',
@@ -145,6 +242,52 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       editable: true,
     },
   ];
+
+  // Compute contracts with sum values
+  const contractsWithSum = useMemo(() => {
+    const result = contracts.map(c => {
+      let sum: number;
+      if (c.discount_type === '%') {
+        sum = c.price * (1 - c.discount_percent / 100);
+      } else {
+        // KR - fixed amount discount
+        sum = c.price - c.discount_percent;
+      }
+      return {
+        ...c,
+        sum: sum,
+      };
+    });
+    console.log('contractsWithSum recalculated:', result);
+    return result;
+  }, [contracts]);
+
+  const handleContractCellChange = (rowId: string, field: string, value: any) => {
+    setContracts(prev => prev.map(c => {
+      if (c.id !== rowId) return c;
+
+      // If sum is edited, recalculate discount based on discount type
+      if (field === 'sum') {
+        const newSum = Number(value);
+        const price = c.price;
+
+        if (c.discount_type === '%') {
+          // sum = price * (1 - discount/100)
+          // discount = (1 - sum/price) * 100
+          const newDiscount = price > 0 ? ((1 - newSum / price) * 100) : 0;
+          return { ...c, discount_percent: Math.max(0, Math.min(100, newDiscount)) };
+        } else {
+          // KR - fixed amount discount
+          // sum = price - discount
+          // discount = price - sum
+          const newDiscount = price - newSum;
+          return { ...c, discount_percent: Math.max(0, newDiscount) };
+        }
+      }
+
+      return { ...c, [field]: value };
+    }));
+  };
 
   const contractColumns: GridColumn[] = [
     {
@@ -162,6 +305,56 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     {
       field: 'price',
       headerName: 'Pris',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
+    },
+    {
+      field: 'discount_type',
+      headerName: 'Rabattyp',
+      width: 100,
+      editable: false,
+      cellRenderer: (value: any, row: any) => {
+        return (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full h-full flex items-center"
+          >
+            <select
+              value={value || '%'}
+              onChange={(e) => {
+                const newType = e.target.value as '%' | 'KR';
+                setContracts(prev => prev.map(c => {
+                  if (c.id === row?.id) {
+                    return { ...c, discount_type: newType };
+                  }
+                  return c;
+                }));
+              }}
+              className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="%">%</option>
+              <option value="KR">KR</option>
+            </select>
+          </div>
+        );
+      },
+      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+    },
+    {
+      field: 'discount_percent',
+      headerName: 'Rabatt',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value) => `${Number(value).toFixed(2)}`,
+    },
+    {
+      field: 'sum',
+      headerName: 'Summa',
       width: 120,
       type: 'number',
       editable: true,
@@ -188,6 +381,52 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     },
   ];
 
+  // Compute campaigns with sum values
+  const campaignsWithSum = useMemo(() => {
+    const result = campaigns.map(c => {
+      let sum: number;
+      if (c.discount_type === '%') {
+        sum = c.campaign_price * (1 - c.discount_percent / 100);
+      } else {
+        // KR - fixed amount discount
+        sum = c.campaign_price - c.discount_percent;
+      }
+      return {
+        ...c,
+        sum: sum,
+      };
+    });
+    console.log('campaignsWithSum recalculated:', result);
+    return result;
+  }, [campaigns]);
+
+  const handleCampaignCellChange = (rowId: string, field: string, value: any) => {
+    setCampaigns(prev => prev.map(c => {
+      if (c.id !== rowId) return c;
+
+      // If sum is edited, recalculate discount based on discount type
+      if (field === 'sum') {
+        const newSum = Number(value);
+        const campaignPrice = c.campaign_price;
+
+        if (c.discount_type === '%') {
+          // sum = campaignPrice * (1 - discount/100)
+          // discount = (1 - sum/campaignPrice) * 100
+          const newDiscount = campaignPrice > 0 ? ((1 - newSum / campaignPrice) * 100) : 0;
+          return { ...c, discount_percent: Math.max(0, Math.min(100, newDiscount)) };
+        } else {
+          // KR - fixed amount discount
+          // sum = campaignPrice - discount
+          // discount = campaignPrice - sum
+          const newDiscount = campaignPrice - newSum;
+          return { ...c, discount_percent: Math.max(0, newDiscount) };
+        }
+      }
+
+      return { ...c, [field]: value };
+    }));
+  };
+
   const campaignColumns: GridColumn[] = [
     {
       field: 'campaign_name',
@@ -204,12 +443,54 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
       valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
     },
     {
-      field: 'discount_percent',
-      headerName: 'Rabatt %',
+      field: 'discount_type',
+      headerName: 'Rabattyp',
       width: 100,
+      editable: false,
+      cellRenderer: (value: any, row: any) => {
+        return (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full h-full flex items-center"
+          >
+            <select
+              value={value || '%'}
+              onChange={(e) => {
+                const newType = e.target.value as '%' | 'KR';
+                setCampaigns(prev => prev.map(c => {
+                  if (c.id === row?.id) {
+                    return { ...c, discount_type: newType };
+                  }
+                  return c;
+                }));
+              }}
+              className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="%">%</option>
+              <option value="KR">KR</option>
+            </select>
+          </div>
+        );
+      },
+      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+    },
+    {
+      field: 'discount_percent',
+      headerName: 'Rabatt',
+      width: 120,
       type: 'number',
       editable: true,
-      valueFormatter: (value) => `${value}%`,
+      valueFormatter: (value) => `${Number(value).toFixed(2)}`,
+    },
+    {
+      field: 'sum',
+      headerName: 'Summa',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
     },
     {
       field: 'start_date',
@@ -262,7 +543,7 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     <div className="flex flex-col h-full">
       {/* Tab Header */}
       <div className="border-b border-slate-200 bg-white">
-        <div className="flex items-center justify-between px-0 py-0">
+        <div className="flex items-center justify-between">
           <div className="flex gap-1">
             {tabs.map((tab) => (
               <button
@@ -296,25 +577,28 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
         {activeTab === 'price_groups' && (
           <SpreadsheetGrid
             columns={priceGroupColumns}
-            data={priceGroups}
+            data={priceGroupsWithSum}
             height="100%"
             showFilter={true}
+            onCellValueChanged={handlePriceGroupCellChange}
           />
         )}
         {activeTab === 'contracts' && (
           <SpreadsheetGrid
             columns={contractColumns}
-            data={contracts}
+            data={contractsWithSum}
             height="100%"
             showFilter={true}
+            onCellValueChanged={handleContractCellChange}
           />
         )}
         {activeTab === 'campaigns' && (
           <SpreadsheetGrid
             columns={campaignColumns}
-            data={campaigns}
+            data={campaignsWithSum}
             height="100%"
             showFilter={true}
+            onCellValueChanged={handleCampaignCellChange}
           />
         )}
       </div>

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SpreadsheetGrid, GridColumn } from './SpreadsheetGrid';
 import { Plus, X } from 'lucide-react';
+import { api } from '../services/api';
 
 interface PriceGroupCustomer {
   id: string;
@@ -15,14 +16,18 @@ interface PriceGroupCustomer {
 
 interface PriceGroupProduct {
   id: string;
+  product_id?: string;
   product_code: string;
   product_name: string;
-  product_type: 'single' | 'product_group' | 'department';
+  product_type: 'single' | 'product_group' | 'department' | 'all';
   product_group_name?: string;
   department_name?: string;
+  purchase_price?: number;
   price_group_price?: number; // Only for single products
   discount_type: '%' | 'KR'; // For categories: type of discount
   discount_value: number; // For single: %, for categories: % or KR based on discount_type
+  margin_percentage?: number; // TG (täckningsgrad) value
+  net_price?: number; // Summa (net price after discount)
   valid_from: string;
   valid_to: string;
 }
@@ -38,7 +43,7 @@ export function CustomerPriceGroupDetailsTabs({
   priceGroupId,
   priceGroupName,
 }: CustomerPriceGroupDetailsTabsProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('customers');
+  const [activeTab, setActiveTab] = useState<TabType>('products');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalProductTab, setModalProductTab] = useState<'single' | 'product_group' | 'department'>('single');
@@ -63,32 +68,147 @@ export function CustomerPriceGroupDetailsTabs({
     },
   ]);
 
-  const [products, setProducts] = useState<PriceGroupProduct[]>([
-    {
-      id: '1',
-      product_code: 'P-001',
-      product_name: 'Widget Premium',
-      product_type: 'single',
-      price_group_price: 120.00,
-      discount_type: '%',
-      discount_value: 15,
-      valid_from: '2024-01-01',
-      valid_to: '2024-12-31',
-    },
-    {
-      id: '2',
-      product_code: 'VG-001',
-      product_name: 'Elektronik (Varugrupp)',
-      product_type: 'product_group',
-      product_group_name: 'Elektronik',
-      discount_type: '%',
-      discount_value: 20,
-      valid_from: '2024-01-01',
-      valid_to: '2024-12-31',
-    },
-  ]);
+  const toNumber = (value: any, fallback = 0) => {
+    if (value == null || value === '') return fallback;
+    const num = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+    return Number.isFinite(num) ? num : fallback;
+  };
 
-  // Autocomplete options
+  const roundTo = (value: number, decimals: number) => {
+    const factor = Math.pow(10, decimals);
+    return Math.round(value * factor) / factor;
+  };
+
+  const hydrateProduct = (product: PriceGroupProduct): PriceGroupProduct => {
+    if (product.product_type !== 'single') {
+      return product;
+    }
+
+    const purchasePrice = toNumber(product.purchase_price, 0);
+    const priceGroupPrice = toNumber(product.price_group_price, 0);
+
+    // For customer price groups, Summa = Utpris (no discount)
+    const calculatedNet = priceGroupPrice;
+    const calculatedMargin = priceGroupPrice > 0
+      ? ((priceGroupPrice - purchasePrice) / priceGroupPrice) * 100
+      : 0;
+
+    return {
+      ...product,
+      purchase_price: roundTo(purchasePrice, 2),
+      price_group_price: roundTo(priceGroupPrice, 2),
+      net_price: product.net_price != null
+        ? roundTo(product.net_price, 2)
+        : roundTo(calculatedNet, 2),
+      margin_percentage: product.margin_percentage != null
+        ? roundTo(product.margin_percentage, 1)
+        : roundTo(calculatedMargin, 1),
+    };
+  };
+
+  const [products, setProducts] = useState<PriceGroupProduct[]>([]);
+
+  useEffect(() => {
+    console.log('CustomerPriceGroupDetailsTabs mounted, priceGroupId:', priceGroupId);
+    if (priceGroupId) {
+      loadProducts();
+    }
+  }, [priceGroupId]);
+
+  const loadProducts = async () => {
+    try {
+      console.log('Loading products for price group:', priceGroupId);
+      const data = await api.customerPriceGroups.getProducts(priceGroupId);
+      console.log('Loaded products:', data);
+      setProducts(data.map(hydrateProduct));
+    } catch (error) {
+      console.error('Error loading price group products:', error);
+    }
+  };
+
+  const handleProductCellValueChange = async (rowId: string, field: string, rawValue: any) => {
+    setProducts(prev =>
+      prev.map(product => {
+        if (product.id !== rowId) {
+          return product;
+        }
+
+        // Allow direct updates for non-single product rows without recalculation.
+        if (product.product_type !== 'single') {
+          const updated = {
+            ...product,
+            [field]: rawValue,
+          };
+          // Save to API asynchronously
+          api.customerPriceGroups.updateProduct(priceGroupId, rowId, { [field]: rawValue })
+            .catch(error => console.error('Error updating price group product:', error));
+          return updated;
+        }
+
+        const purchasePrice = toNumber(product.purchase_price, 0);
+
+        let priceGroupPrice = toNumber(product.price_group_price, 0);
+        let marginPercentage = toNumber(product.margin_percentage, 0);
+        let netPrice = toNumber(product.net_price, 0);
+
+        // For customer price groups: Summa = Utpris (no discount)
+        if (field === 'price_group_price') {
+          priceGroupPrice = toNumber(rawValue, priceGroupPrice);
+          netPrice = priceGroupPrice; // Summa = Utpris
+          marginPercentage = priceGroupPrice > 0
+            ? ((priceGroupPrice - purchasePrice) / priceGroupPrice) * 100
+            : 0;
+        } else if (field === 'margin_percentage') {
+          marginPercentage = toNumber(rawValue, marginPercentage);
+          const clampedMargin = Math.min(marginPercentage, 99.9);
+          const marginDenominator = 1 - clampedMargin / 100;
+          priceGroupPrice = marginDenominator <= 0
+            ? purchasePrice
+            : purchasePrice / marginDenominator;
+          netPrice = priceGroupPrice; // Summa = Utpris
+          marginPercentage = clampedMargin;
+        } else if (field === 'net_price') {
+          netPrice = toNumber(rawValue, netPrice);
+          priceGroupPrice = netPrice; // Utpris = Summa
+          marginPercentage = priceGroupPrice > 0
+            ? ((priceGroupPrice - purchasePrice) / priceGroupPrice) * 100
+            : 0;
+        } else {
+          // For other fields like valid_from, valid_to
+          const updated = { ...product, [field]: rawValue };
+          api.customerPriceGroups.updateProduct(priceGroupId, rowId, { [field]: rawValue })
+            .catch(error => console.error('Error updating price group product:', error));
+          return updated;
+        }
+
+        const normalizedPrice = roundTo(priceGroupPrice, 2);
+        const normalizedNet = roundTo(netPrice, 2);
+        const normalizedMargin = roundTo(marginPercentage, 1);
+
+        const updated = {
+          ...product,
+          price_group_price: normalizedPrice,
+          margin_percentage: normalizedMargin,
+          net_price: normalizedNet,
+        };
+
+        // Save to API
+        api.customerPriceGroups.updateProduct(priceGroupId, rowId, {
+          price_group_price: normalizedPrice,
+          margin_percentage: normalizedMargin,
+          net_price: normalizedNet,
+        }).catch(error => console.error('Error updating price group product:', error));
+
+        return updated;
+      })
+    );
+  };
+
+  // Autocomplete options - load real data
+  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
+  const [availableProductGroups, setAvailableProductGroups] = useState<any[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<any[]>([]);
+
   const availableCustomers = [
     { id: 'c1', name: 'Retail Store AB', number: 'C-2001' },
     { id: 'c2', name: 'Wholesale Partners', number: 'C-2002' },
@@ -96,23 +216,24 @@ export function CustomerPriceGroupDetailsTabs({
     { id: 'c4', name: 'VIP Customer', number: 'C-2004' },
   ];
 
-  const availableProducts = [
-    { id: 'p1', code: 'P-001', name: 'Widget Premium', type: 'single' as const },
-    { id: 'p2', code: 'P-002', name: 'Gadget Deluxe', type: 'single' as const },
-    { id: 'p3', code: 'P-003', name: 'Tool Professional', type: 'single' as const },
-  ];
-
-  const availableProductGroups = [
-    { id: 'pg1', code: 'VG-001', name: 'Elektronik' },
-    { id: 'pg2', code: 'VG-002', name: 'Verktyg' },
-    { id: 'pg3', code: 'VG-003', name: 'Kontorsmaterial' },
-  ];
-
-  const availableDepartments = [
-    { id: 'd1', code: 'AVD-001', name: 'IT' },
-    { id: 'd2', code: 'AVD-002', name: 'Försäljning' },
-    { id: 'd3', code: 'AVD-003', name: 'Produktion' },
-  ];
+  useEffect(() => {
+    // Load products, product groups, and departments
+    const loadAutocompleteData = async () => {
+      try {
+        const [productsData, productGroupsData, departmentsData] = await Promise.all([
+          api.products.getAll(),
+          api.productGroups.getAll(),
+          api.departments.getAll(),
+        ]);
+        setAvailableProducts(productsData);
+        setAvailableProductGroups(productGroupsData);
+        setAvailableDepartments(departmentsData);
+      } catch (error) {
+        console.error('Error loading autocomplete data:', error);
+      }
+    };
+    loadAutocompleteData();
+  }, []);
 
   const customerColumns: GridColumn[] = [
     {
@@ -153,17 +274,20 @@ export function CustomerPriceGroupDetailsTabs({
       headerName: 'Typ',
       width: 120,
       editable: false,
+      valueGetter: (row: PriceGroupProduct) => row.product_type || 'single',
       cellRenderer: (value: string) => {
         const typeLabels = {
           single: 'Produkt',
           product_group: 'Varugrupp',
           department: 'Avdelning',
+          all: 'Hela sortimentet',
         };
         const label = typeLabels[value as keyof typeof typeLabels] || value;
         const colors = {
           single: 'bg-blue-100 text-blue-700',
           product_group: 'bg-green-100 text-green-700',
           department: 'bg-purple-100 text-purple-700',
+          all: 'bg-amber-100 text-amber-700',
         };
         const color = colors[value as keyof typeof colors] || 'bg-slate-100 text-slate-700';
         return (
@@ -171,6 +295,15 @@ export function CustomerPriceGroupDetailsTabs({
             {label}
           </span>
         );
+      },
+      filterTextGetter: (value: string) => {
+        const typeLabels = {
+          single: 'Produkt',
+          product_group: 'Varugrupp',
+          department: 'Avdelning',
+          all: 'Hela sortimentet',
+        };
+        return typeLabels[value as keyof typeof typeLabels] || 'Produkt';
       },
     },
     {
@@ -186,60 +319,44 @@ export function CustomerPriceGroupDetailsTabs({
       editable: false,
     },
     {
-      field: 'price_group_price',
-      headerName: 'Gruppris',
+      field: 'purchase_price',
+      headerName: 'Inköpspris',
       width: 120,
       type: 'number',
-      editable: true,
+      editable: false,
       cellRenderer: (value: any, row: any) => {
-        // Only show price group price for single products
-        if (row?.product_type !== 'single') {
+        if (row?.product_type !== 'single' || value == null) {
           return <span className="text-slate-400">-</span>;
         }
         return `${Number(value || 0).toFixed(2)} kr`;
       },
     },
     {
-      field: 'discount_type',
-      headerName: 'Rabatttyp',
-      width: 100,
-      editable: true,
-      cellRenderer: (value: any, row: any) => {
-        // For single products, always show %
-        if (row?.product_type === 'single') {
-          return <span className="text-slate-600">%</span>;
-        }
-        // For categories, show editable dropdown
-        return (
-          <select
-            value={value || '%'}
-            onChange={(e) => {
-              setProducts(prev => prev.map(p =>
-                p.id === row?.id ? { ...p, discount_type: e.target.value as '%' | 'KR' } : p
-              ));
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="%">%</option>
-            <option value="KR">KR</option>
-          </select>
-        );
-      },
-    },
-    {
-      field: 'discount_value',
-      headerName: 'Rabatt',
+      field: 'price_group_price',
+      headerName: 'Utpris',
       width: 120,
       type: 'number',
       editable: true,
-      cellRenderer: (value: any, row: any) => {
-        if (row?.product_type === 'single') {
-          return `${value}%`;
-        }
-        const discountType = row?.discount_type || '%';
-        return discountType === '%' ? `${value}%` : `${Number(value).toFixed(2)} kr`;
-      },
+      valueFormatter: (value: any) =>
+        value == null ? '-' : `${Number(value).toFixed(2)} kr`,
+    },
+    {
+      field: 'margin_percentage',
+      headerName: 'TG',
+      width: 90,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value: any) =>
+        value == null ? '-' : `${Number(value).toFixed(1)} %`,
+    },
+    {
+      field: 'net_price',
+      headerName: 'Summa',
+      width: 120,
+      type: 'number',
+      editable: true,
+      valueFormatter: (value: any) =>
+        value == null ? '-' : `${Number(value).toFixed(2)} kr`,
     },
     {
       field: 'valid_from',
@@ -283,22 +400,71 @@ export function CustomerPriceGroupDetailsTabs({
     }
   };
 
-  const handleAddItem = (item: any) => {
-    console.log('Adding item to price group:', item);
+  const handleAddItem = async (type: 'single' | 'product_group' | 'department', item: any) => {
+    console.log('Adding item to price group:', { type, item });
+
+    if (activeTab === 'products') {
+      try {
+        const payload: any = {
+          product_type: type,
+          discount_type: '%',
+          discount_value: 0,
+          valid_from: new Date().toISOString().split('T')[0],
+          valid_to: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
+        };
+
+        if (type === 'single') {
+          payload.product_id = item.id;
+          payload.price_group_price = item.purchase_price || 0;
+          payload.margin_percentage = 0;
+          payload.net_price = item.purchase_price || 0;
+        } else if (type === 'product_group') {
+          payload.product_group_id = item.id;
+        } else if (type === 'department') {
+          payload.department_id = item.id;
+        }
+
+        await api.customerPriceGroups.addProduct(priceGroupId, payload);
+        await loadProducts();
+      } catch (error) {
+        console.error('Error adding product to price group:', error);
+      }
+    }
+
+    setIsModalOpen(false);
+    setSearchTerm('');
+  };
+
+  const handleAddEntireAssortment = async () => {
+    try {
+      const payload = {
+        product_type: 'all',
+        discount_type: '%',
+        discount_value: 0,
+        valid_from: new Date().toISOString().split('T')[0],
+        valid_to: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
+      };
+
+      await api.customerPriceGroups.addProduct(priceGroupId, payload);
+      await loadProducts();
+    } catch (error) {
+      console.error('Error adding entire assortment:', error);
+    }
+
     setIsModalOpen(false);
     setSearchTerm('');
   };
 
   const tabs = [
-    { id: 'customers' as TabType, label: 'Kunder', count: customers.length },
     { id: 'products' as TabType, label: 'Produkter', count: products.length },
+    { id: 'customers' as TabType, label: 'Kunder', count: customers.length },
   ];
 
   return (
     <div className="flex flex-col h-full">
       {/* Tab Header */}
       <div className="border-b border-slate-200 bg-white">
-        <div className="flex items-center justify-between px-4 py-2">
+        <div className="flex items-center justify-between">
           <div className="flex gap-1">
             {tabs.map((tab) => (
               <button
@@ -343,6 +509,7 @@ export function CustomerPriceGroupDetailsTabs({
             data={products}
             height="100%"
             showFilter={true}
+            onCellValueChanged={handleProductCellValueChange}
           />
         )}
       </div>
@@ -371,47 +538,58 @@ export function CustomerPriceGroupDetailsTabs({
             <div className="px-6 py-4">
               {/* Product Type Tabs (only show for products) */}
               {activeTab === 'products' && (
-                <div className="mb-4 flex gap-1 border-b border-slate-200">
+                <>
+                  <div className="mb-4 flex gap-1 border-b border-slate-200">
+                    <button
+                      onClick={() => {
+                        setModalProductTab('single');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'single'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Produkter
+                    </button>
+                    <button
+                      onClick={() => {
+                        setModalProductTab('product_group');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'product_group'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Varugrupper
+                    </button>
+                    <button
+                      onClick={() => {
+                        setModalProductTab('department');
+                        setSearchTerm('');
+                      }}
+                      className={`px-3 py-2 text-sm font-medium transition-colors ${
+                        modalProductTab === 'department'
+                          ? 'text-blue-700 border-b-2 border-blue-700'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Avdelningar
+                    </button>
+                  </div>
+
+                  {/* Add entire assortment button */}
                   <button
-                    onClick={() => {
-                      setModalProductTab('single');
-                      setSearchTerm('');
-                    }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'single'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                    onClick={handleAddEntireAssortment}
+                    className="w-full mb-4 px-4 py-3 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors flex items-center justify-center gap-2"
                   >
-                    Produkter
+                    <Plus className="w-4 h-4" />
+                    Lägg till hela sortimentet
                   </button>
-                  <button
-                    onClick={() => {
-                      setModalProductTab('product_group');
-                      setSearchTerm('');
-                    }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'product_group'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Varugrupper
-                  </button>
-                  <button
-                    onClick={() => {
-                      setModalProductTab('department');
-                      setSearchTerm('');
-                    }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      modalProductTab === 'department'
-                        ? 'text-blue-700 border-b-2 border-blue-700'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Avdelningar
-                  </button>
-                </div>
+                </>
               )}
 
               <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -441,15 +619,15 @@ export function CustomerPriceGroupDetailsTabs({
                     getFilteredOptions().map((option: any) => (
                       <button
                         key={option.id}
-                        onClick={() => handleAddItem(option)}
+                        onClick={() => handleAddItem(modalProductTab, option)}
                         className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors border-b border-slate-100 last:border-b-0"
                       >
                         <div className="flex flex-col">
                           <span className="text-sm font-medium text-slate-900">
-                            {activeTab === 'customers' ? option.name : option.name}
+                            {option.name}
                           </span>
                           <span className="text-xs text-slate-500">
-                            {activeTab === 'customers' ? option.number : option.code}
+                            {option.code || option.number}
                           </span>
                         </div>
                       </button>

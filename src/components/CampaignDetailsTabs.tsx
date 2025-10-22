@@ -242,6 +242,24 @@ export function CampaignDetailsTabs({
       },
     },
     {
+      field: 'sum',
+      headerName: 'Summa',
+      width: 120,
+      type: 'number',
+      editable: false,
+      cellRenderer: (value: any, row: any) => {
+        // Only calculate sum for single products
+        if (row?.product_type !== 'single') {
+          return <span className="text-slate-400">-</span>;
+        }
+        const campaignPrice = Number(row?.campaign_price || 0);
+        const discountValue = Number(row?.discount_value || 0);
+        // Apply percentage discount
+        const sum = campaignPrice * (1 - discountValue / 100);
+        return `${sum.toFixed(2)} kr`;
+      },
+    },
+    {
       field: 'valid_from',
       headerName: 'Giltig från',
       width: 120,

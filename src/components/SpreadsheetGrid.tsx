@@ -1,8 +1,33 @@
 'use client';
 
-import { ReactGrid, Column, Row, CellChange, TextCell, NumberCell, DateCell } from '@silevis/reactgrid';
+import {
+  ReactGrid,
+  Column,
+  Row,
+  CellChange,
+  TextCell,
+  NumberCell,
+  DateCell,
+  DropdownCell,
+  CheckboxCell,
+  OptionType,
+  DefaultCellTypes,
+} from '@silevis/reactgrid';
 import '@silevis/reactgrid/styles.css';
 import { useMemo, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
+import {
+  AutocompleteCell,
+  AutocompleteCellTemplate,
+  AutocompleteOption,
+} from './cells/AutocompleteCellTemplate';
+import {
+  CustomDropdownCell,
+  DropdownCellTemplate,
+  type DropdownOption,
+} from './cells/DropdownCellTemplate';
+
+// Re-export for convenience
+export type { DropdownOption };
 
 interface SpreadsheetGridProps<T = any> {
   data: T[];
@@ -20,7 +45,10 @@ export interface GridColumn {
   headerName: string;
   width?: number;
   editable?: boolean;
-  type?: 'text' | 'number' | 'date';
+  isEditable?: (row: any) => boolean;
+  type?: 'text' | 'number' | 'date'; // legacy
+  cellType?: 'text' | 'number' | 'date' | 'dropdown' | 'checkbox' | 'time' | 'autocomplete' | 'customDropdown';
+  valueGetter?: (row: any) => any; // Extract value from row (useful for nested properties)
   valueFormatter?: (value: any) => string;
   // Can return string for plain rendering or ReactNode for custom UI (e.g., badges)
   cellRenderer?: (value: any, row: any) => ReactNode | string;
@@ -28,6 +56,19 @@ export interface GridColumn {
   filterTextGetter?: (value: any, row: any) => string;
   // If true, column keeps fixed width and is excluded from proportional growth
   fixed?: boolean;
+  dropdownOptions?: OptionType[] | ((row: any) => OptionType[]);
+  dropdownPlaceholder?: string;
+  numberFormat?: Intl.NumberFormat;
+  dateFormat?: Intl.DateTimeFormat;
+  checkboxLabels?: {
+    checkedText?: string;
+    uncheckedText?: string;
+  };
+  valueParser?: (cell: DefaultCellTypes | AutocompleteCell, row: any) => any;
+  autocompleteOptions?: AutocompleteOption[] | ((row: any) => AutocompleteOption[]);
+  autocompletePlaceholder?: string;
+  autocompleteCreateLabel?: string;
+  onCreateAutocompleteOption?: (input: string, row: any) => Promise<AutocompleteOption | null>;
 }
 
 export function SpreadsheetGrid<T = any>({
@@ -43,6 +84,9 @@ export function SpreadsheetGrid<T = any>({
 
   // State to track filter values for each column
   const [filters, setFilters] = useState<Record<string, string>>({});
+
+  // State to track dropdown isOpen state per row and field
+  const [dropdownStates, setDropdownStates] = useState<Record<string, Record<string, boolean>>>({});
 
   // Track and persist column widths (resizable)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -157,7 +201,7 @@ export function SpreadsheetGrid<T = any>({
   }), [columns, filters]);
 
   // Filter the data based on filter values
-  const filteredData = useMemo(() => {
+const filteredData = useMemo(() => {
     if (Object.keys(filters).length === 0 || Object.values(filters).every(v => !v)) {
       return data;
     }
@@ -183,20 +227,23 @@ export function SpreadsheetGrid<T = any>({
         return displayValue.toLowerCase().includes(filterValue.toLowerCase());
       });
     });
-  }, [data, filters, columns]);
+}, [data, filters, columns]);
 
-  // Convert data rows to ReactGrid format
-  const dataRows: Row[] = useMemo(() => {
-    return filteredData.map((item: any, idx) => ({
-      rowId: item.id || `row-${idx}`,
-      height: 42,
-      cells: columns.map(col => {
-        const value = item[col.field];
-        const isEditable = col.editable !== false;
+// Convert data rows to ReactGrid format
+const dataRows: Row[] = useMemo(() => {
+    return filteredData.map((item: any, idx) => {
+      const rowId = item.id || `row-${idx}`;
 
-        // Handle custom cell renderer
+      const cells = columns.map(col => {
+        // Use valueGetter if provided, otherwise get value from field
+        const value = col.valueGetter ? col.valueGetter(item) : item[col.field];
+        const baseEditable = col.editable !== false;
+        const isEditable = baseEditable && (col.isEditable ? col.isEditable(item) : true);
+        const cellType = col.cellType ?? col.type ?? 'text';
+
         if (col.cellRenderer) {
           const rendered = col.cellRenderer(value, item);
+
           if (typeof rendered === 'string') {
             return {
               type: 'text',
@@ -205,94 +252,318 @@ export function SpreadsheetGrid<T = any>({
             } as TextCell;
           }
 
-          const fallbackText = col.valueFormatter
-            ? col.valueFormatter(value)
-            : value != null
-              ? String(value)
-              : '';
+          const rawText = value != null ? String(value) : '';
+          const formatted = col.valueFormatter ? col.valueFormatter(value) : rawText;
 
           return {
             type: 'text',
-            text: fallbackText,
+            text: formatted,
             renderer: (_text: string) => rendered as ReactNode,
             nonEditable: true,
           } as TextCell;
         }
 
-        // Handle value formatter
-        const displayValue = col.valueFormatter ? col.valueFormatter(value) : value;
-
-        // Determine cell type
-        const cellType = col.type || 'text';
-
         if (cellType === 'number') {
-          return {
+          const numericValue =
+            typeof value === 'number'
+              ? value
+              : value != null
+                ? Number(String(value).replace(/\s/g, '').replace(',', '.'))
+                : 0;
+
+          const numberCell: NumberCell = {
             type: 'number',
-            value: value != null ? Number(value) : 0,
+            value: Number.isFinite(numericValue) ? numericValue : 0,
             nonEditable: !isEditable,
-          } as NumberCell;
+          };
+
+          if (col.numberFormat) {
+            numberCell.format = col.numberFormat;
+          }
+
+          return numberCell;
         }
 
         if (cellType === 'date') {
-          return {
+          const dateCell: DateCell = {
             type: 'date',
             date: value ? new Date(value) : undefined,
             nonEditable: !isEditable,
-          } as DateCell;
+          };
+
+          if (col.dateFormat) {
+            dateCell.format = col.dateFormat;
+          }
+
+          return dateCell;
         }
 
-        // Default to text cell
-        return {
+        if (cellType === 'dropdown') {
+          const optionsSource = col.dropdownOptions;
+          const options: OptionType[] = (() => {
+            if (!optionsSource) return [];
+            if (typeof optionsSource === 'function') {
+              return optionsSource(item) ?? [];
+            }
+            return optionsSource;
+          })();
+
+          const selectedValue = value != null ? String(value) : undefined;
+
+          // Check if this row has an isOpen state for this field from internal state
+          const rowId = (item as any).id || `row-${dataArray.indexOf(item)}`;
+          const isOpen = dropdownStates[rowId]?.[col.field] || false;
+
+          const dropdownCell: DropdownCell = {
+            type: 'dropdown',
+            selectedValue: selectedValue,
+            inputValue: selectedValue || '',
+            isOpen: isOpen,
+            values: options,
+            isDisabled: false,
+            nonEditable: !isEditable,
+          };
+
+          return dropdownCell;
+        }
+
+        if (cellType === 'checkbox') {
+          const checkboxCell: CheckboxCell = {
+            type: 'checkbox',
+            checked: Boolean(value),
+            nonEditable: !isEditable,
+          };
+
+          if (col.checkboxLabels) {
+            checkboxCell.checkedText = col.checkboxLabels.checkedText;
+            checkboxCell.uncheckedText = col.checkboxLabels.uncheckedText;
+          }
+
+          return checkboxCell;
+        }
+
+        if (cellType === 'autocomplete') {
+          const optionsSource = col.autocompleteOptions;
+          const options: AutocompleteOption[] = (() => {
+            if (!optionsSource) return [];
+            if (typeof optionsSource === 'function') {
+              return optionsSource(item);
+            }
+            return optionsSource;
+          })();
+
+          const selectedValue = value != null ? String(value) : undefined;
+          const displayOption = options.find(option => option.value === selectedValue);
+          const textValue = displayOption?.label ?? (value != null ? String(value) : '');
+
+          const autocompleteCell: AutocompleteCell = {
+            type: 'autocomplete',
+            text: textValue,
+            selectedValue,
+            options,
+            placeholder: col.autocompletePlaceholder,
+            allowCreate: Boolean(col.onCreateAutocompleteOption && isEditable),
+            createOptionLabel: col.autocompleteCreateLabel,
+            onCreateOption: col.onCreateAutocompleteOption
+              ? async (input: string) => col.onCreateAutocompleteOption?.(input, item)
+              : undefined,
+            isDisabled: !isEditable,
+            nonEditable: !isEditable,
+          };
+
+          return autocompleteCell;
+        }
+
+        if (cellType === 'customDropdown') {
+          const optionsSource = col.dropdownOptions;
+          const options: DropdownOption[] = (() => {
+            if (!optionsSource) return [];
+            if (typeof optionsSource === 'function') {
+              return optionsSource(item) ?? [];
+            }
+            return optionsSource as DropdownOption[];
+          })();
+
+          const selectedValue = value != null ? String(value) : undefined;
+
+          // Find the display text for the selected value
+          const selectedOption = options.find(opt => opt.value === selectedValue);
+          const displayText = selectedOption ? selectedOption.label : (selectedValue || '');
+
+          // Check for isOpen state
+          const rowId = (item as any).id || `row-${idx}`;
+          const isOpen = dropdownStates[rowId]?.[col.field] || false;
+
+          const customDropdownCell: CustomDropdownCell = {
+            type: 'customDropdown',
+            selectedValue,
+            options,
+            isDisabled: !isEditable,
+            placeholder: col.dropdownPlaceholder || '',
+            text: displayText,
+            value: parseFloat(selectedValue || '0'),
+            isOpen,
+          };
+
+          return customDropdownCell;
+        }
+
+        const rawText = value != null ? String(value) : '';
+        const formatted = col.valueFormatter ? col.valueFormatter(value) : rawText;
+
+        const textCell: TextCell = {
           type: 'text',
-          text: displayValue != null ? String(displayValue) : '',
+          text: isEditable ? rawText : formatted,
+          placeholder: isEditable && !rawText && formatted ? formatted : undefined,
           nonEditable: !isEditable,
-        } as TextCell;
-      }),
-    }));
-  }, [filteredData, columns]);
+        };
+
+        return textCell;
+      });
+
+      return {
+        rowId,
+        height: 42,
+        cells: cells as any, // Cast to any to allow custom cell types
+      };
+    });
+  }, [filteredData, columns, dropdownStates]);
 
   // Combine all rows
   const rows: Row[] = useMemo(() => {
     return showFilter ? [headerRow, filterRow, ...dataRows] : [headerRow, ...dataRows];
   }, [headerRow, filterRow, dataRows, showFilter]);
 
+  const autocompleteTemplate = useMemo(() => {
+    const template = new AutocompleteCellTemplate();
+    return template;
+  }, []);
+
+  const dropdownTemplate = useMemo(() => {
+    const template = new DropdownCellTemplate();
+    return template;
+  }, []);
+
   // Handle cell changes
-  const handleChanges = useCallback((changes: CellChange[]) => {
-    changes.forEach(change => {
-      const rowId = change.rowId as string;
-      const columnId = change.columnId as string;
-      const newCell = change.newCell;
+  const handleChanges = useCallback(
+    (changes: CellChange[]) => {
+      changes.forEach(change => {
+        const rowId = change.rowId as string;
+        const columnId = change.columnId as string;
+        const newCell = change.newCell as DefaultCellTypes;
 
-      // Handle filter row changes
-      if (rowId === 'filter') {
-        if (newCell.type === 'text') {
-          const filterValue = (newCell as TextCell).text;
-          setFilters(prev => ({
-            ...prev,
-            [columnId]: filterValue,
-          }));
+        // Handle filter row changes
+        if (rowId === 'filter') {
+          if (newCell.type === 'text') {
+            const filterValue = (newCell as TextCell).text;
+            setFilters(prev => ({
+              ...prev,
+              [columnId]: filterValue,
+            }));
+          }
+          return;
         }
-        return;
-      }
 
-      // Skip header row
-      if (rowId === 'header') return;
+        // Skip header row
+        if (rowId === 'header') return;
 
-      // Handle data cell changes
-      if (onCellValueChanged) {
+        const column = columns.find(col => col.field === columnId);
+        const rowData =
+          filteredData.find((item: any, idx: number) => (item.id || `row-${idx}`) === rowId) ?? null;
+
+        // Handle dropdown isOpen state changes
+        if (newCell.type === 'dropdown') {
+          const dropdownCell = newCell as DropdownCell;
+
+          // Update the isOpen state in internal state
+          setDropdownStates(prev => ({
+            ...prev,
+            [rowId]: {
+              ...prev[rowId],
+              [columnId]: dropdownCell.isOpen,
+            },
+          }));
+
+          // Only trigger onCellValueChanged if the value actually changed
+          if (onCellValueChanged) {
+            const oldValue = rowData ? rowData[columnId] : null;
+            const newValue = dropdownCell.inputValue ?? dropdownCell.selectedValue ?? null;
+
+            if (oldValue !== newValue) {
+              onCellValueChanged(rowId, columnId, newValue);
+            }
+          }
+          return;
+        }
+
+        if (!onCellValueChanged) return;
+
         let newValue: any;
-        if (newCell.type === 'text') {
-          newValue = (newCell as TextCell).text;
-        } else if (newCell.type === 'number') {
-          newValue = (newCell as NumberCell).value;
-        } else if (newCell.type === 'date') {
-          newValue = (newCell as DateCell).date;
+
+        // Handle custom cell types first (use type assertion to check)
+        const cellType = (newCell as any).type;
+
+        if (cellType === 'autocomplete') {
+          const autoCell = newCell as unknown as AutocompleteCell;
+          newValue = autoCell.selectedValue ?? autoCell.text ?? null;
+        } else if (cellType === 'customDropdown') {
+          const dropdownCell = newCell as unknown as CustomDropdownCell;
+
+          // Update the isOpen state
+          setDropdownStates(prev => ({
+            ...prev,
+            [rowId]: {
+              ...prev[rowId],
+              [columnId]: dropdownCell.isOpen ?? false,
+            },
+          }));
+
+          // Only trigger onCellValueChanged if the value actually changed
+          if (onCellValueChanged) {
+            const oldValue = rowData ? (rowData as any)[columnId] : null;
+            const newDropdownValue = dropdownCell.selectedValue ?? null;
+
+            if (oldValue !== newDropdownValue) {
+              newValue = newDropdownValue;
+              onCellValueChanged(rowId, columnId, newValue);
+            }
+          }
+          return;
+        } else {
+          // Handle standard ReactGrid cell types
+          switch (newCell.type) {
+            case 'text':
+              newValue = (newCell as TextCell).text;
+              break;
+            case 'number':
+              newValue = (newCell as NumberCell).value;
+              break;
+            case 'date': {
+              const dateValue = (newCell as DateCell).date;
+              newValue = dateValue ? dateValue.toISOString() : null;
+              break;
+            }
+            case 'checkbox':
+              newValue = (newCell as CheckboxCell).checked;
+              break;
+            default:
+              newValue = (newCell as any).text ?? null;
+          }
+        }
+
+        if (column?.valueParser) {
+          try {
+            newValue = column.valueParser(newCell, rowData);
+          } catch (error) {
+            console.error('SpreadsheetGrid: valueParser threw an error', error);
+          }
         }
 
         onCellValueChanged(rowId, columnId, newValue);
-      }
-    });
-  }, [onCellValueChanged]);
+      });
+    },
+    [columns, filteredData, onCellValueChanged],
+  );
 
   // Handle row/cell clicks
   useEffect(() => {
@@ -344,6 +615,12 @@ export function SpreadsheetGrid<T = any>({
         // If onCellClicked is provided and we have a valid column index, call it
         if (onCellClicked && colIndex >= 0 && colIndex < columns.length) {
           const fieldName = columns[colIndex].field;
+          const columnDef = columns[colIndex];
+          const cellType = columnDef.cellType ?? columnDef.type;
+          if (cellType === 'dropdown' || cellType === 'autocomplete') {
+            console.log('SpreadsheetGrid: Dropdown/autocomplete cell click intercepted');
+            return;
+          }
           console.log('SpreadsheetGrid: Calling onCellClicked with field:', fieldName);
           onCellClicked(rowData, fieldName);
         } else if (onRowClicked) {
@@ -363,10 +640,14 @@ export function SpreadsheetGrid<T = any>({
   }, [onRowClicked, onCellClicked, filteredData, columns, showFilter]);
 
   return (
-    <div ref={containerRef} className={className} style={{ height, width: '100%', overflow: 'auto' }}>
+    <div ref={containerRef} className={className} style={{ height, width: '100%'}}>
       <ReactGrid
         rows={rows}
         columns={gridColumns}
+        customCellTemplates={{
+          autocomplete: autocompleteTemplate,
+          customDropdown: dropdownTemplate
+        }}
         onCellsChanged={handleChanges}
         onColumnResized={(columnId, width) => {
           const id = String(columnId);
