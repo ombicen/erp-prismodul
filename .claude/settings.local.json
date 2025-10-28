@@ -63,7 +63,9 @@
       "Bash(npx next build)",
       "Bash(npx tsc:*)",
       "Bash(cat:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []

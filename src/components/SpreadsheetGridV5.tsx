@@ -184,7 +184,6 @@ export function SpreadsheetGrid<T = any>({
             onTextChanged: (newText: string) => {
               setFilters(prev => ({ ...prev, [col.field]: newText }));
             },
-            rowIndex: 1,
           } as TextCellProps,
         });
       });
@@ -210,7 +209,6 @@ export function SpreadsheetGrid<T = any>({
             text: typeof rendered === 'string' ? rendered : (value != null ? String(value) : ''),
             nonEditable: true,
             renderer: typeof rendered === 'string' ? undefined : () => rendered,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({
@@ -234,7 +232,6 @@ export function SpreadsheetGrid<T = any>({
             onValueChanged: isEditable
               ? (newValue: number) => onCellValueChanged?.(rowId, col.field, newValue)
               : undefined,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({
@@ -251,7 +248,6 @@ export function SpreadsheetGrid<T = any>({
             onDateChanged: isEditable
               ? (newDate: Date | undefined) => onCellValueChanged?.(rowId, col.field, newDate)
               : undefined,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({
@@ -278,7 +274,6 @@ export function SpreadsheetGrid<T = any>({
             onValueChanged: isEditable
               ? (newValue: string) => onCellValueChanged?.(rowId, col.field, newValue)
               : undefined,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({
@@ -294,7 +289,6 @@ export function SpreadsheetGrid<T = any>({
             onCheckedChanged: isEditable
               ? (newChecked: boolean) => onCellValueChanged?.(rowId, col.field, newChecked)
               : undefined,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({
@@ -313,7 +307,6 @@ export function SpreadsheetGrid<T = any>({
             onTextChanged: isEditable
               ? (newText: string) => onCellValueChanged?.(rowId, col.field, newText)
               : undefined,
-            rowIndex: currentRowIndex,
           };
 
           cellsArray.push({

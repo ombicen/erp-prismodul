@@ -3,14 +3,16 @@
 @tailwind utilities;
 
 /* ReactGrid full width override */
-.reactgrid {
+.reactgrid,
+.reactgrid-content,
+.rg-viewport {
   width: 100% !important;
   max-width: none !important;
 }
 
-.reactgrid-content {
+/* Ensure grid container is full width */
+.reactgrid > div {
   width: 100% !important;
-  max-width: none !important;
 }
 
 /* ReactGrid font size - 14px for all cells */
@@ -30,4 +32,26 @@
 
 .reactgrid .rg-row:not(.rg-header-row):not([data-row-id="filter"]):active {
   background-color: #f1f5f9 !important;
+}
+
+/* ReactGrid v5 cell styles */
+.rg-cell-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.rg-cell-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 0 8px;
+  font-size: 14px;
+  font-family: inherit;
+  background: white;
+  box-sizing: border-box;
 }
