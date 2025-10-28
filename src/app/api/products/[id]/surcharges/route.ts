@@ -41,6 +41,8 @@ export async function GET(
         cost_value: ps.surcharge.cost_value.toNumber(),
         type: ps.surcharge.type,
         is_active: ps.surcharge.is_active,
+        sort_order: ps.surcharge.sort_order,
+        source: ps.surcharge.source,
       },
     }));
 

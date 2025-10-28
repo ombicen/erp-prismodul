@@ -72,6 +72,10 @@ export async function PATCH(request: NextRequest) {
   try {
     const { id, ...data } = await request.json();
 
+    console.log('=== PATCH /api/surcharges ===');
+    console.log('Updating surcharge ID:', id);
+    console.log('Raw update data received:', JSON.stringify(data, null, 2));
+
     // Map scope_type to type if provided (for backwards compatibility)
     if (data.scope_type) {
       data.type = data.scope_type;
@@ -86,16 +90,33 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    console.log('Data being sent to Prisma:', JSON.stringify(data, null, 2));
+
     const updated = await prisma.surcharge.update({
       where: { id },
       data,
     });
+
+    console.log('Updated surcharge from DB:', JSON.stringify({
+      id: updated.id,
+      name: updated.name,
+      source: updated.source,
+      sort_order: updated.sort_order,
+      cost_type: updated.cost_type,
+      cost_value: updated.cost_value.toNumber(),
+    }, null, 2));
 
     const serialized = {
       ...updated,
       cost_value: updated.cost_value.toNumber(),
       created_at: updated.created_at.toISOString(),
     };
+
+    console.log('Serialized response:', JSON.stringify({
+      id: serialized.id,
+      source: serialized.source,
+      sort_order: serialized.sort_order,
+    }, null, 2));
 
     return NextResponse.json(serialized);
   } catch (error) {

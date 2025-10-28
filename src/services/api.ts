@@ -250,13 +250,30 @@ export const api = {
       return response.json();
     },
     update: async (id: string, data: any) => {
+      const payload = { id, ...data };
+      console.log('=== API CLIENT: surcharges.update ===');
+      console.log('URL: /api/surcharges');
+      console.log('Method: PATCH');
+      console.log('Payload:', JSON.stringify(payload, null, 2));
+
       const response = await fetch('/api/surcharges', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, ...data }),
+        body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error('Failed to update surcharge');
-      return response.json();
+
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error('Failed to update surcharge');
+      }
+
+      const result = await response.json();
+      console.log('Response data:', result);
+      return result;
     },
     getProducts: async (surchargeId: string) => {
       const response = await fetch(`/api/surcharges/${surchargeId}/products`);

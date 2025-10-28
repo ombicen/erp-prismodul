@@ -50,8 +50,16 @@ export async function GET(
         cost_value: ss.surcharge.cost_value.toNumber(),
         type: ss.surcharge.type,
         is_active: ss.surcharge.is_active,
+        sort_order: ss.surcharge.sort_order,
+        source: ss.surcharge.source,
       },
     }));
+
+    console.log(`=== GET /api/product-suppliers/${supplierProductId}/surcharges ===`);
+    console.log(`Found ${serialized.length} supplier surcharges`);
+    serialized.forEach(s => {
+      console.log(`  - ${s.surcharge.name}: source=${s.surcharge.source}, sort_order=${s.surcharge.sort_order}`);
+    });
 
     return NextResponse.json(serialized);
   } catch (error) {

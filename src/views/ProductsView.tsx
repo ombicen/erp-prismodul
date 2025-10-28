@@ -49,41 +49,15 @@ interface ProductRow {
 }
 
 interface ProductSupplier {
-
-
-
   id: string;
-
-
-
   supplier_id: string;
-
-
-
   supplier_name: string;
-
-
-
   base_price: number;
-
-
-
   freight_cost: number;
-
-
-
   discount_type: '%' | 'KR';
-
-
-
   discount_value: number;
-
-
-
   is_primary: boolean;
-
-
-
+  surcharges: Surcharge[]; // Embedded surcharges for this supplier
 }
 
 
@@ -104,6 +78,8 @@ interface Surcharge {
   is_active: boolean;
   created_at: string;
   computed_amount?: number; // Calculated amount for display
+  sort_order?: number; // For ordering surcharges (critical for kalkylpris cascade)
+  source?: 'final_price' | 'calculation_price'; // Where to apply: Slutpris or Kalkylpris
 }
 
 // For backward compatibility with existing code
@@ -276,26 +252,11 @@ export function ProductsView() {
 
 
 
-  // Supplier state for Kalkylpris editor
-
-
-
+  // Supplier state for Kalkylpris editor (refactored with embedded surcharges)
   const [productSuppliers, setProductSuppliers] = useState<ProductSupplier[]>([]);
-
-
-
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
-
-
-
+  const [activeSupplier, setActiveSupplier] = useState<ProductSupplier | null>(null); // SSOT for active supplier
   const [allSuppliers, setAllSuppliers] = useState<SupplierOption[]>([]);
-
-
-
   const [newSupplierDraft, setNewSupplierDraft] = useState<NewSupplierDraft>(createEmptySupplierDraft);
-
-
-
   const [isCreatingSupplier, setIsCreatingSupplier] = useState(false);
 
 
@@ -305,9 +266,6 @@ export function ProductsView() {
 
 
   // Surcharge state (previously labeled 'Other costs')
-
-
-
   const [productSurcharges, setProductSurcharges] = useState<ProductSurcharge[]>([]);
   const [surchargesLoading, setSurchargesLoading] = useState(false);
   const [allSurcharges, setAllSurcharges] = useState<any[]>([]);
@@ -316,6 +274,7 @@ export function ProductsView() {
     cost_type: '%' as '%' | 'KR',
     cost_value: 0,
     scope_type: 'product' as 'product' | 'supplier',
+    source: 'final_price' as 'final_price' | 'calculation_price',
   });
 
 
@@ -559,69 +518,47 @@ export function ProductsView() {
 
 
   const loadProductSuppliers = async (productId: string) => {
-
-
+    console.log('=== loadProductSuppliers START ===');
+    console.log('productId:', productId);
 
     try {
-
-
-
       const data = await api.productSuppliers.getByProduct(productId);
+      console.log('Raw suppliers data:', data);
 
+      // Load surcharges for each supplier and embed them
+      const suppliersWithSurcharges = await Promise.all(
+        data.map(async (supplier: ProductSupplier) => {
+          console.log(`Loading surcharges for supplier ${supplier.id} (${supplier.supplier_name})`);
+          try {
+            const surcharges = await api.productSuppliers.getSurcharges(supplier.id);
+            console.log(`Surcharges for supplier ${supplier.supplier_name}:`, surcharges);
+            return { ...supplier, surcharges: surcharges || [] };
+          } catch (error) {
+            console.error(`Error loading surcharges for supplier ${supplier.id}:`, error);
+            return { ...supplier, surcharges: [] };
+          }
+        })
+      );
 
+      console.log('All suppliers with embedded surcharges:', suppliersWithSurcharges);
+      setProductSuppliers(suppliersWithSurcharges);
 
-      setProductSuppliers(data);
-
-
-
-      // Set the primary supplier as selected by default
-
-
-
-      const primary = data.find((ps: ProductSupplier) => ps.is_primary);
-
-
-
+      // Set the primary supplier as active by default
+      const primary = suppliersWithSurcharges.find((ps: ProductSupplier) => ps.is_primary);
       if (primary) {
-
-
-
-        setSelectedSupplierId(primary.id);
-
-
-
-      } else if (data.length > 0) {
-
-
-
-        setSelectedSupplierId(data[0].id);
-
-
-
+        console.log('Setting primary supplier as active:', primary);
+        setActiveSupplier(primary);
+      } else if (suppliersWithSurcharges.length > 0) {
+        console.log('Setting first supplier as active:', suppliersWithSurcharges[0]);
+        setActiveSupplier(suppliersWithSurcharges[0]);
       } else {
-
-
-
-        setSelectedSupplierId('');
-
-
-
+        console.log('No suppliers found, setting activeSupplier to null');
+        setActiveSupplier(null);
       }
-
-
-
+      console.log('=== loadProductSuppliers END ===');
     } catch (error) {
-
-
-
       console.error('Error loading product suppliers:', error);
-
-
-
     }
-
-
-
   };
 
 
@@ -632,41 +569,16 @@ export function ProductsView() {
 
   const loadProductSurcharges = async (productId: string) => {
     setSurchargesLoading(true);
-
     try {
-
-      // Load product-scoped surcharges
+      // Only load product-scoped surcharges
+      // Supplier surcharges are now embedded in productSuppliers array
       const productSurcharges = await api.surcharges.getByProduct(productId);
-
-      // Load supplier-scoped surcharges for all suppliers of this product
-      const suppliers = await api.productSuppliers.getByProduct(productId);
-      const supplierSurchargesPromises = suppliers.map((supplier: ProductSupplier) =>
-        api.productSuppliers.getSurcharges(supplier.id)
-      );
-      const supplierSurchargesArrays = await Promise.all(supplierSurchargesPromises);
-      const supplierSurcharges = supplierSurchargesArrays.flat();
-
-      // Combine both types
-      const allSurcharges = [...productSurcharges, ...supplierSurcharges];
-
-      setProductSurcharges(allSurcharges);
-
-
-
+      setProductSurcharges(productSurcharges);
     } catch (error) {
-
-
-
       console.error('Error loading product surcharges:', error);
-
-
-
     } finally {
       setSurchargesLoading(false);
     }
-
-
-
   };
 
 
@@ -798,31 +710,20 @@ export function ProductsView() {
 
   const suppliersWithSlutpris = useMemo(() => {
 
-
-
     const existing = productSuppliers.map(supplier => {
 
-
+      // Convert to numbers (DB might return Decimal objects or strings)
+      const basePrice = Number(supplier.base_price || 0);
+      const freightCost = Number(supplier.freight_cost || 0);
+      const discountValue = Number(supplier.discount_value || 0);
 
       const discountAmount = supplier.discount_type === '%'
+        ? basePrice * (discountValue / 100)
+        : discountValue;
 
-
-
-        ? supplier.base_price * (supplier.discount_value / 100)
-
-
-
-        : supplier.discount_value;
-
-
-
-      const slutpris = supplier.base_price + supplier.freight_cost - discountAmount;
-
-
+      const slutpris = basePrice + freightCost - discountAmount;
 
       return { ...supplier, slutpris };
-
-
 
     });
 
@@ -940,11 +841,10 @@ export function ProductsView() {
 
 
 
-  // Get selected supplier for cost summary
-
-
-
-  const selectedSupplier = suppliersWithSlutpris.find(s => s.id === selectedSupplierId);
+  // Get selected supplier for cost summary (SSOT: derived from activeSupplier)
+  const selectedSupplier = activeSupplier
+    ? suppliersWithSlutpris.find(s => s.id === activeSupplier.id)
+    : null;
 
 
 
@@ -1069,7 +969,7 @@ export function ProductsView() {
       setSurchargesLoading(false);
       console.log('Updated surcharges state');
 
-      // Step 4: Update local supplier state
+      // Step 4: Update local supplier state and active supplier
       setProductSuppliers(prev =>
         prev.map(supplier => {
           if (supplier.id === rowId) {
@@ -1077,6 +977,11 @@ export function ProductsView() {
             const supplierInfo = allSuppliers.find(s => s.id === processedValue);
             nextSupplier.supplier_name =
               supplierInfo?.name ?? selectedLabel ?? supplier.supplier_name ?? '';
+
+            // Update active supplier if this is the active one
+            if (activeSupplier?.id === rowId) {
+              setActiveSupplier(nextSupplier);
+            }
             return nextSupplier;
           }
           return supplier;
@@ -1089,7 +994,7 @@ export function ProductsView() {
     return;
   }
 
-  // For non-supplier_id changes, use the original logic
+  // For non-supplier_id changes, update the supplier and active supplier if needed
   setProductSuppliers(prev =>
     prev.map(supplier => {
       if (supplier.id === rowId) {
@@ -1098,6 +1003,11 @@ export function ProductsView() {
           const supplierInfo = allSuppliers.find(s => s.id === processedValue);
           nextSupplier.supplier_name =
             supplierInfo?.name ?? selectedLabel ?? supplier.supplier_name ?? '';
+        }
+
+        // Update active supplier if this is the active one
+        if (activeSupplier?.id === rowId) {
+          setActiveSupplier(nextSupplier);
         }
         return nextSupplier;
       }
@@ -1110,7 +1020,7 @@ export function ProductsView() {
   } catch (error) {
     console.error('Error updating product supplier:', error);
   }
-}, [allSuppliers, api, setProductSuppliers, setNewSupplierDraft, selectedProduct, loadProductSurcharges, productSuppliers]);
+}, [allSuppliers, api, setProductSuppliers, setNewSupplierDraft, selectedProduct, loadProductSurcharges, productSuppliers, activeSupplier]);
 
 const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
@@ -1220,13 +1130,13 @@ const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
 
 
-      setProductSuppliers(prev => [...prev, created]);
+      // Add surcharges array to the new supplier
+      const createdWithSurcharges = { ...created, surcharges: [] };
 
+      setProductSuppliers(prev => [...prev, createdWithSurcharges]);
 
-
-      setSelectedSupplierId(created.id);
-
-
+      // Set the newly created supplier as active
+      setActiveSupplier(createdWithSurcharges);
 
       setNewSupplierDraft(createEmptySupplierDraft());
 
@@ -1252,9 +1162,11 @@ const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
 
 
-  }, [selectedProduct, productSuppliers, setProductSuppliers, setSelectedSupplierId, setNewSupplierDraft, setIsCreatingSupplier]);
+  }, [selectedProduct, productSuppliers, setProductSuppliers, setActiveSupplier, setNewSupplierDraft, setIsCreatingSupplier]);
 
 const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: string, rawValue: any) => {
+  console.log('=== handleSurchargeCellValueChange ===', { rowId, field, rawValue });
+
   // Handle new surcharge row
   if (rowId === NEW_SURCHARGE_ROW_ID) {
     let updatedData = { ...newSurchargeData };
@@ -1271,7 +1183,7 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
           // Reload product surcharges
           const updated = await api.surcharges.getByProduct(selectedProduct.id);
           setProductSurcharges(updated);
-          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product' });
+          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product', source: 'final_price' });
         } catch (error) {
           console.error('Error creating product surcharge:', error);
         }
@@ -1286,6 +1198,13 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
     // Handle scope_type field
     if (field === 'scope_type') {
       updatedData.scope_type = rawValue as 'product' | 'supplier';
+      setNewSurchargeData(updatedData);
+      return;
+    }
+
+    // Handle source field
+    if (field === 'source') {
+      updatedData.source = rawValue as 'final_price' | 'calculation_price';
       setNewSurchargeData(updatedData);
       return;
     }
@@ -1316,13 +1235,13 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
           const scopeType = updatedData.scope_type || 'product';
           let scopeId = selectedProduct.id;
 
-          // If supplier type, use the selected supplier's ID
+          // If supplier type, use the active supplier's ID
           if (scopeType === 'supplier') {
-            if (!selectedSupplierId) {
+            if (!activeSupplier) {
               console.error('No supplier selected for supplier-scoped surcharge');
               return;
             }
-            scopeId = selectedSupplierId;
+            scopeId = activeSupplier.id;
           }
 
           // Create the new surcharge
@@ -1333,11 +1252,12 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
             scope_type: scopeType,
             scope_id: scopeId,
             is_active: true,
+            source: updatedData.source || 'final_price',
           });
 
           // Reload surcharges
           await loadProductSurcharges(selectedProduct.id);
-          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product' });
+          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product', source: 'final_price' });
           await loadAllSurcharges(); // Reload to include the new surcharge
         } catch (error) {
           console.error('Error creating surcharge:', error);
@@ -1355,13 +1275,109 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
   // Handle existing surcharge updates
   if (!selectedProduct) return;
 
-  // Find the surcharge to update
-  const surchargeToUpdate = productSurcharges.find(ps => ps.id === rowId);
-  if (!surchargeToUpdate) return;
+  // Find the surcharge to update - check both product and supplier surcharges
+  let surchargeToUpdate = productSurcharges.find(ps => ps.id === rowId);
+  let isSupplierSurcharge = false;
+
+  // If not found in product surcharges, check supplier surcharges
+  if (!surchargeToUpdate && activeSupplier?.surcharges) {
+    console.log('Checking supplier surcharges:', activeSupplier.surcharges);
+    const supplierSurcharge = activeSupplier.surcharges.find(s => s.id === rowId);
+    console.log('Found supplier surcharge:', supplierSurcharge);
+
+    if (supplierSurcharge) {
+      isSupplierSurcharge = true;
+      // Convert supplier surcharge format to match productSurcharge format
+      surchargeToUpdate = {
+        id: supplierSurcharge.id,
+        surcharge_id: supplierSurcharge.surcharge_id,
+        product_id: selectedProduct.id,
+        surcharge: supplierSurcharge.surcharge || supplierSurcharge,
+      } as any;
+      console.log('Converted supplier surcharge:', surchargeToUpdate);
+    }
+  }
+
+  if (!surchargeToUpdate) {
+    console.warn('Surcharge not found:', rowId);
+    return;
+  }
+
+  console.log('Processing surcharge update:', {
+    rowId,
+    field,
+    rawValue,
+    isSupplierSurcharge,
+    surchargeToUpdate
+  });
 
   try {
+    // Handle computed_amount changes (reverse-calculate cost_value)
+    if (field === 'computed_amount') {
+      const newComputedAmount = Number(rawValue) || 0;
+
+      // Get source and cost_type from the surcharge
+      const source = surchargeToUpdate.surcharge?.source || 'final_price';
+      const costType = surchargeToUpdate.surcharge?.cost_type || '%';
+
+      // Calculate base amount - need to get supplier with slutpris
+      const suppliersWithSlutprisLocal = productSuppliers.map(supplier => {
+        const basePrice = Number(supplier.base_price || 0);
+        const freightCost = Number(supplier.freight_cost || 0);
+        const discountValue = Number(supplier.discount_value || 0);
+        const discountAmount = supplier.discount_type === '%'
+          ? basePrice * (discountValue / 100)
+          : discountValue;
+        const slutpris = basePrice + freightCost - discountAmount;
+        return { ...supplier, slutpris };
+      });
+
+      const selectedSupplier = suppliersWithSlutprisLocal.find(s => s.id === activeSupplier?.id);
+      if (!selectedSupplier) return;
+
+      // Calculate what the base amount is for this surcharge
+      let baseAmount = selectedSupplier.slutpris;
+      if (source === 'calculation_price') {
+        // For kalkylpris, need to sum up all surcharges before this one
+        // This is simplified - we'll use slutpris for now since exact calculation
+        // requires knowing the order of all surcharges
+        // TODO: If needed, implement full cascade calculation here
+        baseAmount = selectedSupplier.slutpris;
+      }
+
+      // Reverse-calculate cost_value
+      let newCostValue = 0;
+      if (costType === '%') {
+        // computed_amount = baseAmount * (cost_value / 100)
+        // cost_value = (computed_amount / baseAmount) * 100
+        newCostValue = baseAmount > 0 ? (newComputedAmount / baseAmount) * 100 : 0;
+      } else {
+        // For KR, cost_value = computed_amount
+        newCostValue = newComputedAmount;
+      }
+
+      console.log('Reverse-calculated cost_value:', {
+        newComputedAmount,
+        baseAmount,
+        costType,
+        newCostValue
+      });
+
+      // Update the surcharge with new cost_value
+      await api.surcharges.update(surchargeToUpdate.surcharge_id, {
+        cost_value: Number(newCostValue.toFixed(2))
+      });
+
+      // Reload surcharges
+      const updated = await api.surcharges.getByProduct(selectedProduct.id);
+      setProductSurcharges(updated);
+      await loadAllSurcharges();
+      await loadProductSuppliers(selectedProduct.id);
+      return;
+    }
+
     // Update the surcharge based on field
-    if (field === 'cost_type' || field === 'cost_value') {
+    if (field === 'cost_type' || field === 'cost_value' || field === 'source') {
       // Update the surcharge itself
       const updateData: any = {};
 
@@ -1369,19 +1385,96 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
         updateData.cost_type = rawValue;
       } else if (field === 'cost_value') {
         updateData.cost_value = Number(rawValue) || 0;
+      } else if (field === 'source') {
+        updateData.source = rawValue;
+        console.log('Updating source:', { surcharge_id: surchargeToUpdate.surcharge_id, newSource: rawValue });
       }
 
-      await api.surcharges.update(surchargeToUpdate.surcharge_id, updateData);
+      // Optimistic update - immediately update the UI
+      const oldProductSurcharges = [...productSurcharges];
+      const oldProductSuppliers = [...productSuppliers];
 
-      // Reload surcharges
-      const updated = await api.surcharges.getByProduct(selectedProduct.id);
-      setProductSurcharges(updated);
-      await loadAllSurcharges(); // Reload all surcharges to reflect changes
+      // Update productSurcharges optimistically
+      const optimisticProductSurcharges = productSurcharges.map(ps => {
+        if (ps.id === rowId) {
+          return {
+            ...ps,
+            surcharge: {
+              ...ps.surcharge,
+              ...updateData,
+            },
+          };
+        }
+        return ps;
+      });
+      setProductSurcharges(optimisticProductSurcharges);
+
+      // Update supplier surcharges optimistically if needed
+      if (isSupplierSurcharge && activeSupplier) {
+        const optimisticSuppliers = productSuppliers.map(supplier => {
+          if (supplier.id === activeSupplier.id) {
+            return {
+              ...supplier,
+              surcharges: supplier.surcharges.map(s => {
+                if (s.id === rowId) {
+                  return {
+                    ...s,
+                    surcharge: {
+                      ...(s.surcharge || s),
+                      ...updateData,
+                    },
+                  };
+                }
+                return s;
+              }),
+            };
+          }
+          return supplier;
+        });
+        setProductSuppliers(optimisticSuppliers);
+
+        // Update active supplier as well
+        const updatedActiveSupplier = optimisticSuppliers.find(s => s.id === activeSupplier.id);
+        if (updatedActiveSupplier) {
+          setActiveSupplier(updatedActiveSupplier);
+        }
+      }
+
+      try {
+        console.log('Updating surcharge:', { surcharge_id: surchargeToUpdate.surcharge_id, updateData });
+        await api.surcharges.update(surchargeToUpdate.surcharge_id, updateData);
+
+        // Reload surcharges to ensure consistency
+        console.log('Reloading surcharges after update...');
+        const updated = await api.surcharges.getByProduct(selectedProduct.id);
+        setProductSurcharges(updated);
+        await loadAllSurcharges(); // Reload all surcharges to reflect changes
+
+        // IMPORTANT: Reload supplier surcharges too (they have embedded surcharges)
+        await loadProductSuppliers(selectedProduct.id);
+        console.log('Surcharge update complete');
+      } catch (error) {
+        console.error('Error updating surcharge, reverting optimistic update:', error);
+
+        // Revert optimistic update on error
+        setProductSurcharges(oldProductSurcharges);
+        setProductSuppliers(oldProductSuppliers);
+
+        // Restore active supplier
+        const restoredActiveSupplier = oldProductSuppliers.find(s => s.id === activeSupplier?.id);
+        if (restoredActiveSupplier) {
+          setActiveSupplier(restoredActiveSupplier);
+        }
+
+        // TODO: Show toast error notification
+        alert('Kunde inte spara ändringen. Var god försök igen.');
+        throw error; // Re-throw to be caught by outer catch
+      }
     }
   } catch (error) {
     console.error('Error updating surcharge:', error);
   }
-}, [selectedProduct, productSurcharges, newSurchargeData, api, setProductSurcharges, loadAllSurcharges, selectedSupplierId, loadProductSurcharges]);
+}, [selectedProduct, productSurcharges, newSurchargeData, api, setProductSurcharges, loadAllSurcharges, activeSupplier, loadProductSurcharges, loadProductSuppliers, productSuppliers]);
 
 
 
@@ -1431,74 +1524,114 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
 
 
 
-  // Calculate surcharges with computed amounts
-
-
-
+  // Calculate surcharges with computed amounts (DRY: combines product + active supplier surcharges)
   const surchargesWithAmounts = useMemo(() => {
+    console.log('=== surchargesWithAmounts calculation START ===');
+    console.log('activeSupplier:', activeSupplier);
+    console.log('productSurcharges:', productSurcharges);
 
-
-
-    if (!selectedSupplier) {
-
-
-
-      return productSurcharges.map(p => ({ ...p, computed_amount: 0 }));
-
-
-
+    if (!activeSupplier) {
+      console.log('No active supplier, returning only product surcharges');
+      return productSurcharges.map(p => ({ ...p, computed_amount: p.computed_amount || 0 }));
     }
 
-    // Filter surcharges based on scope:
-    // - Product surcharges (scope_type === 'product'): always apply
-    // - Supplier surcharges (scope_type === 'supplier'): only if scope_id matches selected supplier
-    const applicableSurcharges = productSurcharges.filter(p => {
-      if (p.scope_type === 'product') {
-        return true; // Product surcharges always apply
-      } else if (p.scope_type === 'supplier') {
-        // Supplier surcharges only apply if they match the selected supplier's ProductSupplier ID
-        return p.scope_id === selectedSupplier.id;
-      }
-      return false;
+    console.log('activeSupplier.surcharges:', activeSupplier.surcharges);
+    console.log('Number of supplier surcharges:', activeSupplier.surcharges?.length || 0);
+
+    // SSOT: Combine product surcharges with active supplier's embedded surcharges
+    const supplierSurchargesMapped = (activeSupplier.surcharges || []).map(s => {
+      console.log('Mapping supplier surcharge:', s);
+      // Supplier surcharges have a nested 'surcharge' object with the actual data
+      const surchargeData = s.surcharge || s;
+      return {
+        id: s.id,
+        surcharge_id: s.surcharge_id || s.id,
+        product_id: selectedProduct?.id || '',
+        scope_type: surchargeData.type || surchargeData.scope_type || 'supplier',
+        scope_id: s.supplier_id,
+        surcharge: {
+          id: surchargeData.id,
+          name: surchargeData.name,
+          cost_type: surchargeData.cost_type,
+          cost_value: surchargeData.cost_value,
+          scope_type: surchargeData.type || surchargeData.scope_type || 'supplier',
+          source: surchargeData.source || 'final_price', // ✅ Added
+          sort_order: surchargeData.sort_order || 0, // ✅ Added
+        },
+        computed_amount: 0, // Will be calculated below
+      };
     });
 
-    return applicableSurcharges.map(p => {
+    console.log('Mapped supplier surcharges:', supplierSurchargesMapped);
 
+    const combinedSurcharges = [
+      ...productSurcharges,
+      ...supplierSurchargesMapped
+    ];
 
+    console.log('Combined surcharges (product + supplier):', combinedSurcharges);
+    console.log('Total combined surcharges:', combinedSurcharges.length);
 
-      let computed_amount = 0;
+    const selectedSupplier = suppliersWithSlutpris.find(s => s.id === activeSupplier.id);
+    console.log('selectedSupplier from suppliersWithSlutpris:', selectedSupplier);
 
+    if (!selectedSupplier) {
+      console.warn('Could not find selectedSupplier in suppliersWithSlutpris!');
+      return combinedSurcharges.map(p => ({ ...p, computed_amount: p.computed_amount || 0 }));
+    }
 
+    // Sort by sort_order and apply cascading calculation based on source
+    const result = combinedSurcharges
+      .sort((a, b) => (a.surcharge.sort_order || 0) - (b.surcharge.sort_order || 0))
+      .reduce((acc, p) => {
+        let computed_amount = 0;
 
-      if (p.surcharge.cost_type === '%') {
+        // Determine base amount based on source (källa)
+        const source = p.surcharge.source || 'final_price';
+        const baseAmount = source === 'calculation_price'
+          ? acc.runningTotal  // Kalkylpris: use accumulated total
+          : selectedSupplier.slutpris;  // Slutpris: use fixed supplier price
 
+        // Convert cost_value to number (it might be a Decimal or string from DB)
+        const costValue = Number(p.surcharge.cost_value);
 
+        console.log(`Calculating ${p.surcharge.name}:`, {
+          source,
+          cost_type: p.surcharge.cost_type,
+          cost_value: costValue,
+          baseAmount,
+          slutpris: selectedSupplier.slutpris,
+          runningTotal: acc.runningTotal
+        });
 
-        computed_amount = selectedSupplier.slutpris * (p.surcharge.cost_value / 100);
+        // Calculate surcharge amount
+        if (p.surcharge.cost_type === '%') {
+          if (!isNaN(baseAmount) && !isNaN(costValue)) {
+            computed_amount = baseAmount * (costValue / 100);
+          } else {
+            console.error(`Cannot calculate percentage: baseAmount=${baseAmount}, costValue=${costValue}`);
+            computed_amount = 0;
+          }
+        } else {
+          computed_amount = isNaN(costValue) ? 0 : costValue; // Fixed KR amount
+        }
 
+        console.log(`Computed ${p.surcharge.name} (source: ${source}): base=${Number(baseAmount).toFixed(2)}, amount=${computed_amount.toFixed(2)}, running=${(acc.runningTotal + computed_amount).toFixed(2)}`);
 
+        // Add to result array and update running total
+        acc.results.push({ ...p, computed_amount });
+        acc.runningTotal += computed_amount;
 
-      } else {
+        return acc;
+      }, { results: [] as any[], runningTotal: Number(selectedSupplier.slutpris || 0) })
+      .results;
 
+    console.log('=== Final surchargesWithAmounts result ===');
+    console.log('Result:', result);
+    console.log('=== surchargesWithAmounts calculation END ===');
 
-
-        computed_amount = p.surcharge.cost_value;
-
-
-
-      }
-
-
-
-      return { ...p, computed_amount };
-
-
-
-    });
-
-
-
-  }, [productSurcharges, selectedSupplier]);
+    return result;
+  }, [productSurcharges, activeSupplier, suppliersWithSlutpris, selectedProduct]);
 
 
 
@@ -1759,23 +1892,31 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
 
 
   const surchargesWithNewRow = useMemo(() => {
+    console.log('=== surchargesWithNewRow calculation ===');
+    console.log('surchargesWithAmounts:', surchargesWithAmounts);
+
     const newRow: ProductSurcharge & { id: string; surcharge_id: string } = {
       id: NEW_SURCHARGE_ROW_ID,
       surcharge_id: '',
       product_id: selectedProduct?.id || '',
       scope_type: newSurchargeData.scope_type || 'product',
-      scope_id: newSurchargeData.scope_type === 'supplier' ? selectedSupplierId : (selectedProduct?.id || ''),
+      scope_id: newSurchargeData.scope_type === 'supplier' ? (activeSupplier?.id || '') : (selectedProduct?.id || ''),
       surcharge: {
         id: '',
         name: newSurchargeData.name || '',
         cost_type: newSurchargeData.cost_type,
         cost_value: newSurchargeData.cost_value,
         scope_type: newSurchargeData.scope_type || 'product',
+        source: newSurchargeData.source || 'final_price',
       },
       computed_amount: 0,
     };
-    return [...productSurcharges, newRow];
-  }, [productSurcharges, newSurchargeData, selectedProduct, selectedSupplierId]);
+
+    // Use surchargesWithAmounts (which includes both product + supplier surcharges) instead of productSurcharges
+    const result = [...surchargesWithAmounts, newRow];
+    console.log('surchargesWithNewRow result:', result);
+    return result;
+  }, [surchargesWithAmounts, newSurchargeData, selectedProduct, activeSupplier]);
 
   const surchargeDropdownOptions = useMemo(() => {
     // Get IDs of already added surcharges
@@ -1857,6 +1998,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
       headerName: 'Typ',
       width: 140,
       editable: true,
+      isEditable: (row: any) => row.id === NEW_SURCHARGE_ROW_ID, // Only allow editing on new row
       sortable: true,
       cellType: 'customDropdown',
       dropdownOptions: () => scopeTypeOptions,
@@ -1896,41 +2038,47 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
 
 
     {
-
-
-
       field: 'cost_value',
-
-
-
       headerName: 'Värde',
-
-
-
       width: 120,
-
-
-
       cellType: 'number',
       editable: true,
       isEditable: (row: any) => true, // Allow editing all rows
       valueGetter: (params: any) => params.surcharge?.cost_value || 0,
       // Removed cellRenderer to allow editing in new row
       // Note: existing rows will show plain numbers without % or kr suffix
-
-
-
     },
-
-
-
+    {
+      field: 'source',
+      headerName: 'Källa',
+      width: 140,
+      editable: true,
+      isEditable: (row: any) => true, // Allow editing all rows
+      sortable: true,
+      cellType: 'customDropdown',
+      dropdownOptions: () => [
+        { label: 'Slutpris', value: 'final_price' },
+        { label: 'Kalkylpris', value: 'calculation_price' }
+      ],
+      valueGetter: (row: any) => row.surcharge?.source || 'final_price',
+      filterTextGetter: (_value: any, row: any) => {
+        const source = row.surcharge?.source || 'final_price';
+        return source === 'final_price' ? 'Slutpris' : 'Kalkylpris';
+      },
+    },
     {
       field: 'computed_amount',
       headerName: 'Summa',
       width: 140,
-      type: 'number',
-      editable: false,
-      valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
+      cellType: 'number',
+      editable: true,
+      isEditable: (row: any) => true, // Allow editing all rows
+      valueGetter: (row: any) => Number(row.computed_amount || 0),
+      valueFormatter: (value) => `${Number(value || 0).toFixed(2)} kr`,
+      numberFormat: new Intl.NumberFormat('sv-SE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
     },
     {
       field: 'actions',
@@ -2021,11 +2169,15 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
 
             name="selectedSupplier"
 
-            checked={selectedSupplierId === row.id}
+            checked={activeSupplier?.id === row.id}
 
             onChange={async () => {
 
-              setSelectedSupplierId(row.id);
+              // Find the full supplier object and set it as active
+              const supplier = suppliersWithSlutpris.find(s => s.id === row.id);
+              if (supplier) {
+                setActiveSupplier(productSuppliers.find(ps => ps.id === row.id) || null);
+              }
 
 
 
@@ -2237,7 +2389,9 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
 
 ], [
 
-  selectedSupplierId,
+  activeSupplier,
+
+  productSuppliers,
 
   suppliersWithSlutpris,
 
@@ -2835,22 +2989,11 @@ if (loading) {
 
           <SpreadsheetGrid
 
-
-
             columns={surchargeColumns}
 
-
-
-            data={surchargesWithNewRow.map(s => ({
-              ...s,
-              computed_amount: surchargesWithAmounts.find(sa => sa.id === s.id)?.computed_amount || 0
-            }))}
-
-
+            data={surchargesWithNewRow}
 
             height="100%"
-
-
 
             showFilter={false}
             sortable={true}
@@ -3035,7 +3178,7 @@ if (loading) {
 
 
 
-                    <span className="font-medium">+ {p.computed_amount.toFixed(2)} kr</span>
+                    <span className="font-medium">+ {(p.computed_amount || 0).toFixed(2)} kr</span>
 
 
 
