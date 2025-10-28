@@ -164,6 +164,20 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     }));
   };
 
+  const discountTypeLabelMap: Record<'%' | 'KR', string> = {
+    '%': 'Percent (%)',
+    KR: 'Fixed (SEK)',
+  };
+
+  const discountTypeOptions = useMemo(
+    () =>
+      (Object.keys(discountTypeLabelMap) as Array<'%' | 'KR'>).map(value => ({
+        value,
+        label: discountTypeLabelMap[value],
+      })),
+    [],
+  );
+
   const priceGroupColumns: GridColumn[] = [
     {
       field: 'group_name',
@@ -181,37 +195,13 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     },
     {
       field: 'discount_type',
-      headerName: 'Rabattyp',
-      width: 100,
-      editable: false,
-      cellRenderer: (value: any, row: any) => {
-        return (
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full h-full flex items-center"
-          >
-            <select
-              value={value || '%'}
-              onChange={(e) => {
-                const newType = e.target.value as '%' | 'KR';
-                setPriceGroups(prev => prev.map(p => {
-                  if (p.id === row?.id) {
-                    return { ...p, discount_type: newType };
-                  }
-                  return p;
-                }));
-              }}
-              className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-            >
-              <option value="%">%</option>
-              <option value="KR">KR</option>
-            </select>
-          </div>
-        );
-      },
-      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+      headerName: 'Discount Type',
+      width: 120,
+      editable: true,
+      cellType: 'customDropdown',
+      dropdownPlaceholder: 'Select discount type',
+      dropdownOptions: () => discountTypeOptions,
+      filterTextGetter: (value: any) => discountTypeLabelMap[value as '%' | 'KR'] ?? 'Discount Type',
     },
     {
       field: 'discount_percent',
@@ -312,37 +302,13 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
     },
     {
       field: 'discount_type',
-      headerName: 'Rabattyp',
-      width: 100,
-      editable: false,
-      cellRenderer: (value: any, row: any) => {
-        return (
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full h-full flex items-center"
-          >
-            <select
-              value={value || '%'}
-              onChange={(e) => {
-                const newType = e.target.value as '%' | 'KR';
-                setContracts(prev => prev.map(c => {
-                  if (c.id === row?.id) {
-                    return { ...c, discount_type: newType };
-                  }
-                  return c;
-                }));
-              }}
-              className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-            >
-              <option value="%">%</option>
-              <option value="KR">KR</option>
-            </select>
-          </div>
-        );
-      },
-      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+      headerName: 'Discount Type',
+      width: 120,
+      editable: true,
+      cellType: 'customDropdown',
+      dropdownPlaceholder: 'Select discount type',
+      dropdownOptions: () => discountTypeOptions,
+      filterTextGetter: (value: any) => discountTypeLabelMap[value as '%' | 'KR'] ?? 'Discount Type',
     },
     {
       field: 'discount_percent',
@@ -474,8 +440,6 @@ export function DetailsTabs({ productId, productName }: DetailsTabsProps) {
           </div>
         );
       },
-      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
-    },
     {
       field: 'discount_percent',
       headerName: 'Rabatt',

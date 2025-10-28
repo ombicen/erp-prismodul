@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { SpreadsheetGrid, GridColumn } from './SpreadsheetGrid';
 import { Plus, X } from 'lucide-react';
 
@@ -199,11 +199,26 @@ export function ContractDetailsTabs({
     const factor = Math.pow(10, decimals);
     return Math.round(value * factor) / factor;
   };
+  const changeTypeLabelMap: Record<ChangeType, string> = {
+    percentage_surcharge: 'Percentage Surcharge',
+    kr_surcharge: 'Fixed Surcharge (SEK)',
+    discount_percentage: 'Percentage Discount',
+    discount_kr: 'Fixed Discount (SEK)',
+    fixed_price: 'Fixed Price',
+  };
+
+  const changeTypeOptions = useMemo(() =>
+    (Object.keys(changeTypeLabelMap) as ChangeType[]).map(value => ({
+      value,
+      label: changeTypeLabelMap[value],
+    })),
+  []);
+
 
   const handleProductCellValueChange = (rowId: string, field: string, rawValue: any) => {
     setProducts(prev =>
       prev.map(product => {
-        if (product.id !== rowId || product.product_type !== 'single') {
+        if (product.id !== rowId) {
           return product;
         }
 
@@ -214,7 +229,38 @@ export function ContractDetailsTabs({
         let marginPercentage = toNumber(product.margin_percentage, 0);
         let netPrice = toNumber(product.net_price, 0);
 
-        if (field === 'change_value') {
+        if (field === 'change_type') {
+          const newChangeType = rawValue as ChangeType;
+
+          if (product.product_type !== 'single') {
+            return { ...product, change_type: newChangeType };
+          }
+
+          let netPrice = 0;
+          if (newChangeType === 'percentage_surcharge') {
+            const surcharge = purchasePrice * (changeValue / 100);
+            netPrice = slutpris + surcharge;
+          } else if (newChangeType === 'kr_surcharge') {
+            netPrice = slutpris + changeValue;
+          } else if (newChangeType === 'discount_percentage') {
+            netPrice = slutpris * (1 - changeValue / 100);
+          } else if (newChangeType === 'discount_kr') {
+            netPrice = slutpris - changeValue;
+          } else if (newChangeType === 'fixed_price') {
+            netPrice = changeValue;
+          }
+
+          const marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
+
+          return {
+            ...product,
+            change_type: newChangeType,
+            net_price: roundTo(netPrice, 2),
+            margin_percentage: roundTo(marginPercentage, 1),
+          };
+        } else if (product.product_type !== 'single') {
+          return { ...product, [field]: rawValue };
+        } else if (field === 'change_value') {
           changeValue = toNumber(rawValue, changeValue);
           // Recalculate net_price based on change_type
           // Påslag beräknas på inköpspriset (ökar priset)
@@ -369,69 +415,14 @@ export function ContractDetailsTabs({
     },
     {
       field: 'change_type',
-      headerName: 'Förändring',
-      width: 150,
-      editable: false,
-      cellRenderer: (value: any, row: any) => {
-        const changeTypes = {
-          percentage_surcharge: '% Påslag',
-          kr_surcharge: 'kr Påslag',
-          discount_percentage: '% Rabatt',
-          discount_kr: 'kr Rabatt',
-          fixed_price: 'Fast pris',
-        };
-
-        return (
-          <select
-            value={value || 'discount_percentage'}
-            onChange={(e) => {
-              const newChangeType = e.target.value as ChangeType;
-              setProducts(prev => prev.map(p => {
-                if (p.id !== row?.id || p.product_type !== 'single') {
-                  return { ...p, change_type: newChangeType };
-                }
-
-                // Recalculate based on new change type
-                const purchasePrice = toNumber(p.purchase_price, 0);
-                const slutpris = toNumber(p.slutpris, 0);
-                const changeValue = toNumber(p.change_value, 0);
-                let netPrice = 0;
-
-                // Calculate net_price with new change type
-                if (newChangeType === 'percentage_surcharge') {
-                  const surcharge = purchasePrice * (changeValue / 100);
-                  netPrice = slutpris + surcharge;
-                } else if (newChangeType === 'kr_surcharge') {
-                  netPrice = slutpris + changeValue;
-                } else if (newChangeType === 'discount_percentage') {
-                  netPrice = slutpris * (1 - changeValue / 100);
-                } else if (newChangeType === 'discount_kr') {
-                  netPrice = slutpris - changeValue;
-                } else if (newChangeType === 'fixed_price') {
-                  netPrice = changeValue;
-                }
-
-                const marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
-
-                return {
-                  ...p,
-                  change_type: newChangeType,
-                  net_price: roundTo(netPrice, 2),
-                  margin_percentage: roundTo(marginPercentage, 1),
-                };
-              }));
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full h-full px-2 text-sm border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-          >
-            <option value="percentage_surcharge">% Påslag</option>
-            <option value="kr_surcharge">kr Påslag</option>
-            <option value="discount_percentage">% Rabatt</option>
-            <option value="discount_kr">kr Rabatt</option>
-            <option value="fixed_price">Fast pris</option>
-          </select>
-        );
-      },
+      headerName: 'Change Type',
+      width: 180,
+      editable: true,
+      cellType: 'customDropdown',
+      dropdownPlaceholder: 'Select change type',
+      dropdownOptions: () => changeTypeOptions,
+      filterTextGetter: (value: any) => changeTypeLabelMap[value as ChangeType] ?? 'Change Type',
+    },
     },
     {
       field: 'change_value',
