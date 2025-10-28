@@ -13,7 +13,6 @@ import {
   OptionType,
   DefaultCellTypes,
   Id,
-  DropPosition,
 } from '@silevis/reactgrid';
 import '@silevis/reactgrid/styles.css';
 import { useMemo, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
@@ -39,7 +38,7 @@ interface SpreadsheetGridProps<T = any> {
   onRowClicked?: (row: T) => void;
   onCellClicked?: (row: T, field: string) => void;
   onDeleteRows?: (rowIds: string[]) => void; // Called when Delete key is pressed with selected rows
-  onRowsReordered?: (targetRowId: string, rowIds: string[], dropPosition: 'before' | 'after') => void; // Called when rows are reordered via drag & drop
+  onRowsReordered?: (targetRowId: string, rowIds: string[]) => void; // Called when rows are reordered via drag & drop
   height?: string;
   className?: string;
   showFilter?: boolean; // Toggle filter row visibility
@@ -497,6 +496,7 @@ const dataRows: Row[] = useMemo(() => {
         rowId,
         height: 32,
         cells: cells as any, // Cast to any to allow custom cell types
+        reorderable: reorderable, // Enable row reordering if prop is true
       };
     });
   }, [filteredData, columns, dropdownStates]);
@@ -728,13 +728,12 @@ const dataRows: Row[] = useMemo(() => {
 
   // Handle row reordering
   const handleRowsReorder = useCallback(
-    (targetRowId: Id, rowIds: Id[], dropPosition: DropPosition) => {
+    (targetRowId: Id, rowIds: Id[]) => {
       if (!onRowsReordered) return;
-      // Convert Id to string and DropPosition to 'before' | 'after'
+      // Convert Id to string
       const targetId = String(targetRowId);
       const ids = rowIds.map(id => String(id));
-      const position = dropPosition === 'before' || dropPosition === 'after' ? dropPosition : 'after';
-      onRowsReordered(targetId, ids, position);
+      onRowsReordered(targetId, ids);
     },
     [onRowsReordered]
   );

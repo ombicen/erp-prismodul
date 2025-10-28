@@ -1,12 +1,11 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import type { SyntheticEvent } from 'react';
+import type { SyntheticEvent, KeyboardEvent } from 'react';
 import type {
   Cell,
   CellTemplate,
   Compatible,
-  DropdownCell,
   Uncertain,
   UncertainCompatible,
 } from '@silevis/reactgrid';
@@ -142,6 +141,9 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [localOptions, setLocalOptions] = useState<AutocompleteOption[]>(cell.options ?? []);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -176,11 +178,23 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
     return undefined;
   }, [isOpen]);
 
+  // Memoize only when open for performance
   const filteredOptions = useMemo(() => {
+    if (!isOpen) return localOptions;
     if (!inputValue) return localOptions;
     const lowered = inputValue.toLowerCase();
     return localOptions.filter(option => option.label.toLowerCase().includes(lowered));
-  }, [localOptions, inputValue]);
+  }, [localOptions, inputValue, isOpen]);
+
+  // Ensure unique option values for React keys
+  const uniqueOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return filteredOptions.filter(opt => {
+      if (seen.has(opt.value)) return false;
+      seen.add(opt.value);
+      return true;
+    });
+  }, [filteredOptions]);
 
   const handleSelectOption = useCallback(
     (option: AutocompleteOption) => {
@@ -192,6 +206,7 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
       };
       setInputValue(option.label);
       setIsOpen(false);
+      setHighlightedIndex(-1);
       onChange(updated, true);
     },
     [cell, onChange],
@@ -208,14 +223,19 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
       handleSelectOption(maybeExisting);
       return;
     }
+    setLoading(true);
+    setError(null);
     try {
       const creation = await cell.onCreateOption(trimmed);
       if (creation) {
         setLocalOptions(prev => [...prev, creation]);
         handleSelectOption(creation);
       }
-    } catch (error) {
-      console.error('Autocomplete cell: failed to create option', error);
+    } catch (err) {
+      setError('Kunde inte skapa alternativ. Försök igen.');
+      console.error('Autocomplete cell: failed to create option', err);
+    } finally {
+      setLoading(false);
     }
   }, [cell, handleSelectOption, inputValue, localOptions]);
 
@@ -226,6 +246,57 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
     !localOptions.some(
       option => option.label.toLowerCase() === inputValue.trim().toLowerCase(),
     );
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setIsOpen(true);
+      setHighlightedIndex(prev => Math.min(prev + 1, uniqueOptions.length - 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setIsOpen(true);
+      setHighlightedIndex(prev => Math.max(prev - 1, 0));
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      if (highlightedIndex >= 0 && highlightedIndex < uniqueOptions.length) {
+        handleSelectOption(uniqueOptions[highlightedIndex]);
+      } else if (showCreateOption) {
+        handleCreateOption();
+      } else if (uniqueOptions.length === 1) {
+        handleSelectOption(uniqueOptions[0]);
+      } else if (uniqueOptions.length === 0 && inputValue.trim()) {
+        onChange({ ...cell, text: inputValue }, true);
+        setIsOpen(false);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsOpen(false);
+      inputRef.current?.blur();
+    } else if (event.key === 'Tab') {
+      event.preventDefault();
+      if (inputValue !== cell.text) {
+        onChange({ ...cell, text: inputValue }, true);
+      }
+      setIsOpen(false);
+      inputRef.current?.blur();
+    }
+  }, [highlightedIndex, uniqueOptions, showCreateOption, handleSelectOption, handleCreateOption, inputValue, cell, onChange]);
+
+  const handleMenuPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  }, []);
+
+  const handleCreateOptionClick = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    handleCreateOption();
+  }, [handleCreateOption]);
+
+  const handleOptionClick = useCallback((option: AutocompleteOption) => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    handleSelectOption(option);
+  }, [handleSelectOption]);
 
   return (
     <div
@@ -245,6 +316,11 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
           });
         }
       }}
+      role="combobox"
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      aria-owns="autocomplete-listbox"
+      aria-controls="autocomplete-listbox"
     >
       <input
         ref={inputRef}
@@ -257,54 +333,34 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
           padding: 0,
           color: cell.isDisabled ? '#94a3b8' : '#1e293b',
         }}
-        onChange={(event) => {
+        onChange={useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
           const text = event.target.value;
           setInputValue(text);
           if (!isOpen) setIsOpen(true);
-        }}
-        onFocus={() => {
+        }, [isOpen])}
+        onFocus={useCallback(() => {
           if (!cell.isDisabled) {
             setIsFocused(true);
             setIsOpen(true);
           }
-        }}
-        onBlur={() => {
+        }, [cell.isDisabled])}
+        onBlur={useCallback(() => {
           setIsFocused(false);
-        }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            if (filteredOptions.length === 1) {
-              handleSelectOption(filteredOptions[0]);
-            } else if (showCreateOption) {
-              handleCreateOption();
-            } else if (filteredOptions.length === 0 && inputValue.trim()) {
-              // If no options and there's text, commit the current value
-              onChange({ ...cell, text: inputValue }, true);
-              setIsOpen(false);
-            }
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
-            setIsOpen(false);
-            inputRef.current?.blur();
-          } else if (event.key === 'Tab') {
-            event.preventDefault();
-            if (inputValue !== cell.text) {
-              onChange({ ...cell, text: inputValue }, true);
-            }
-            setIsOpen(false);
-            inputRef.current?.blur();
-          }
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
+        }, [])}
+        onKeyDown={handleKeyDown}
+  onPointerDown={useCallback((e: React.PointerEvent<HTMLInputElement>) => e.stopPropagation(), [])}
+        aria-autocomplete="list"
+        aria-controls="autocomplete-listbox"
+        aria-activedescendant={highlightedIndex >= 0 ? `autocomplete-option-${highlightedIndex}` : undefined}
       />
 
       {/* Dropdown list - render inside cell with absolute positioning */}
       {isOpen && (
         <div
+          id="autocomplete-listbox"
+          role="listbox"
           className="rg-autocomplete-menu"
-          onPointerDown={(e) => e.stopPropagation()}
+          onPointerDown={handleMenuPointerDown}
           style={{
             position: 'absolute',
             top: '100%',
@@ -319,18 +375,18 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
             zIndex: 10000,
           }}
         >
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => (
+          {uniqueOptions.length > 0 ? (
+            uniqueOptions.map((option, idx) => (
               <div
                 key={option.value}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  handleSelectOption(option);
-                }}
-                className="rg-autocomplete-option"
+                id={`autocomplete-option-${idx}`}
+                role="option"
+                aria-selected={highlightedIndex === idx}
+                onPointerDown={handleOptionClick(option)}
+                className={`rg-autocomplete-option${highlightedIndex === idx ? ' rg-autocomplete-option--highlighted' : ''}`}
                 style={{
                   padding: '8px 12px',
-                  backgroundColor: option.value === cell.selectedValue ? '#dbeafe' : 'white',
+                  backgroundColor: highlightedIndex === idx ? '#dbeafe' : 'white',
                   cursor: option.isDisabled ? 'not-allowed' : 'pointer',
                   fontSize: '13px',
                   color: option.isDisabled ? '#94a3b8' : '#1e293b',
@@ -353,10 +409,7 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
 
           {showCreateOption && (
             <div
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                handleCreateOption();
-              }}
+              onPointerDown={handleCreateOptionClick}
               className="rg-autocomplete-create"
               style={{
                 padding: '8px 12px',
@@ -368,10 +421,13 @@ function AutocompleteCellEditor({ cell, inEditMode, onChange }: AutocompleteCell
                 backgroundColor: 'white',
               }}
             >
-              {cell.createOptionLabel
+              {loading ? 'Skapar...' : cell.createOptionLabel
                 ? cell.createOptionLabel.replace('{input}', inputValue.trim())
                 : `Create "${inputValue.trim()}"`}
             </div>
+          )}
+          {error && (
+            <div style={{ color: '#dc2626', padding: '8px 12px', fontSize: '13px' }}>{error}</div>
           )}
         </div>
       )}

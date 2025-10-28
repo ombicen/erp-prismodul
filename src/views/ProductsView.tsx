@@ -22,7 +22,7 @@ import { DetailsTabs } from '../components/DetailsTabs';
 
 
 
-import { Package, Trash2 } from 'lucide-react';
+import { Package, Trash2, GripVertical } from 'lucide-react';
 
 
 
@@ -541,16 +541,22 @@ export function ProductsView() {
       );
 
       console.log('All suppliers with embedded surcharges:', suppliersWithSurcharges);
-      setProductSuppliers(suppliersWithSurcharges);
+
+      // Sort suppliers alphabetically by name
+      const sortedSuppliers = suppliersWithSurcharges.sort((a, b) =>
+        a.supplier_name.localeCompare(b.supplier_name)
+      );
+
+      setProductSuppliers(sortedSuppliers);
 
       // Set the primary supplier as active by default
-      const primary = suppliersWithSurcharges.find((ps: ProductSupplier) => ps.is_primary);
+      const primary = sortedSuppliers.find((ps: ProductSupplier) => ps.is_primary);
       if (primary) {
         console.log('Setting primary supplier as active:', primary);
         setActiveSupplier(primary);
-      } else if (suppliersWithSurcharges.length > 0) {
-        console.log('Setting first supplier as active:', suppliersWithSurcharges[0]);
-        setActiveSupplier(suppliersWithSurcharges[0]);
+      } else if (sortedSuppliers.length > 0) {
+        console.log('Setting first supplier as active:', sortedSuppliers[0]);
+        setActiveSupplier(sortedSuppliers[0]);
       } else {
         console.log('No suppliers found, setting activeSupplier to null');
         setActiveSupplier(null);
@@ -1476,9 +1482,68 @@ const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: 
   }
 }, [selectedProduct, productSurcharges, newSurchargeData, api, setProductSurcharges, loadAllSurcharges, activeSupplier, loadProductSurcharges, loadProductSuppliers, productSuppliers]);
 
+  // Helper function to reorder arrays (from ReactGrid v4 docs)
+  const reorderArray = useCallback(<T extends any>(arr: T[], idxs: number[], to: number): T[] => {
+    const movedElements = arr.filter((_, idx) => idxs.includes(idx));
+    let targetIdx = to;
 
+    if (Math.min(...idxs) < to) {
+      targetIdx += 1;
+    } else {
+      targetIdx -= idxs.filter(idx => idx < to).length;
+    }
 
+    const leftSide = arr.filter((_, idx) => idx < targetIdx && !idxs.includes(idx));
+    const rightSide = arr.filter((_, idx) => idx >= targetIdx && !idxs.includes(idx));
+    return [...leftSide, ...movedElements, ...rightSide];
+  }, []);
 
+  const handleSurchargeRowsReordered = useCallback(async (targetRowId: string, rowIds: string[]) => {
+    console.log('=== handleSurchargeRowsReordered ===', { targetRowId, rowIds });
+
+    // Don't allow reordering the new row
+    if (rowIds.includes(NEW_SURCHARGE_ROW_ID) || targetRowId === NEW_SURCHARGE_ROW_ID) {
+      console.log('Cannot reorder the new row');
+      return;
+    }
+
+    if (!selectedProduct) return;
+
+    try {
+      // Get current surcharges (without the new row)
+      const currentSurcharges = surchargesWithAmounts;
+
+      // Find target index and row indices
+      const targetIndex = currentSurcharges.findIndex(s => s.id === targetRowId);
+      if (targetIndex === -1) return;
+
+      const rowIndices = rowIds.map(id => currentSurcharges.findIndex(s => s.id === id));
+
+      // Use the reorderArray helper function
+      const reordered = reorderArray(currentSurcharges, rowIndices, targetIndex);
+
+      // Calculate new sort_order values
+      const updates = reordered.map((surcharge, index) => ({
+        id: surcharge.surcharge_id,
+        sort_order: index,
+      }));
+
+      console.log('Updating sort_order:', updates);
+
+      // Update sort_order in database
+      await api.surcharges.updateSortOrder(updates);
+
+      // Reload data to reflect changes
+      await loadProductSurcharges(selectedProduct.id);
+      await loadAllSurcharges();
+      if (activeSupplier) {
+        await loadProductSuppliers(selectedProduct.id);
+      }
+    } catch (error) {
+      console.error('Error reordering surcharges:', error);
+      alert('Kunde inte ändra ordningen. Var god försök igen.');
+    }
+  }, [selectedProduct, api, loadProductSurcharges, loadAllSurcharges, activeSupplier, loadProductSuppliers, reorderArray]);
 
   useEffect(() => {
 
@@ -1952,6 +2017,19 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
   );
 
   const surchargeColumns = useMemo<GridColumn[]>(() => [
+    {
+      field: 'drag_handle',
+      headerName: '',
+      width: 40,
+      editable: false,
+      sortable: false,
+      cellRenderer: () => (
+        <div className="flex items-center justify-center h-full cursor-grab active:cursor-grabbing pointer-events-none">
+          <GripVertical size={16} className="text-slate-400 pointer-events-none" />
+        </div>
+      ),
+      valueGetter: () => '',
+    },
     {
       field: 'name',
       headerName: 'Påslag',
@@ -2699,7 +2777,7 @@ if (loading) {
 
 
 
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-scroll">
 
 
 
@@ -2997,8 +3075,10 @@ if (loading) {
 
             showFilter={false}
             sortable={true}
+            reorderable={true}
 
             onCellValueChanged={handleSurchargeCellValueChange}
+            onRowsReordered={handleSurchargeRowsReordered}
 
 
 
