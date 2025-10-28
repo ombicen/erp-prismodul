@@ -52,7 +52,7 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
       const rulesMap = new Map(rulesData.map((r: any) => [r.target_id, r]));
 
       const enrichedProducts = productsData.map((p: any) => {
-        const rule = rulesMap.get(p.id);
+        const rule = rulesMap.get(p.id) as any;
 
         const discountValue = rule?.discount_value || 0;
         const purchasePrice = p.purchase_price;
@@ -428,10 +428,12 @@ export function ContextualPriceView({ contextType, contextId, contextName }: Con
   return (
     <PanelLayout
       mainPanel={mainPanel}
-      detailsPanel={selectedProduct ? detailsPanel : undefined}
-      bottomPanel={showBottomPanel ? bottomPanel : undefined}
-      onDetailsClose={() => setSelectedProduct(null)}
-      onBottomClose={() => setShowBottomPanel(false)}
+      detailsPanel={detailsPanel}
+      bottomPanel={bottomPanel}
+      isDetailsOpen={selectedProduct !== null}
+      isBottomOpen={showBottomPanel}
+      onCloseDetails={() => setSelectedProduct(null)}
+      onCloseBottom={() => setShowBottomPanel(false)}
     />
   );
 }

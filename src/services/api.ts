@@ -145,12 +145,22 @@ export const api = {
       if (!response.ok) throw new Error('Failed to create supplier');
       return response.json();
     },
+    getSurcharges: async (supplierId: string) => {
+      const response = await fetch(`/api/suppliers/${supplierId}/surcharges`);
+      if (!response.ok) throw new Error('Failed to fetch supplier surcharges');
+      return response.json();
+    },
   },
 
   productSuppliers: {
     getByProduct: async (productId: string) => {
       const response = await fetch(`/api/product-suppliers?product_id=${productId}`);
       if (!response.ok) throw new Error('Failed to fetch product suppliers');
+      return response.json();
+    },
+    getSurcharges: async (supplierProductId: string) => {
+      const response = await fetch(`/api/product-suppliers/${supplierProductId}/surcharges`);
+      if (!response.ok) throw new Error('Failed to fetch supplier surcharges');
       return response.json();
     },
     create: async (data: any) => {
@@ -169,6 +179,15 @@ export const api = {
         body: JSON.stringify({ id, ...data }),
       });
       if (!response.ok) throw new Error('Failed to update product supplier');
+      return response.json();
+    },
+    delete: async (id: string) => {
+      const response = await fetch('/api/product-suppliers', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error('Failed to delete product supplier');
       return response.json();
     },
     setPrimary: async (productId: string, supplierId: string) => {
@@ -263,6 +282,60 @@ export const api = {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Failed to remove product from surcharge');
+      return response.json();
+    },
+    getSuppliers: async (surchargeId: string) => {
+      const response = await fetch(`/api/surcharges/${surchargeId}/suppliers`);
+      if (!response.ok) throw new Error('Failed to fetch surcharge suppliers');
+      return response.json();
+    },
+    addSupplier: async (surchargeId: string, supplierId: string) => {
+      const response = await fetch(`/api/surcharges/${surchargeId}/suppliers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierId }),
+      });
+      if (!response.ok) throw new Error('Failed to add supplier to surcharge');
+      return response.json();
+    },
+    removeSupplier: async (surchargeId: string, supplierId: string) => {
+      const response = await fetch(`/api/surcharges/${surchargeId}/suppliers/${supplierId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to remove supplier from surcharge');
+      return response.json();
+    },
+    cascadeDeleteProducts: async (surchargeId: string) => {
+      const response = await fetch(`/api/surcharges/${surchargeId}/cascade-delete-products`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to cascade delete products');
+      return response.json();
+    },
+    cascadeDeleteSuppliers: async (surchargeId: string) => {
+      const response = await fetch(`/api/surcharges/${surchargeId}/cascade-delete-suppliers`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to cascade delete suppliers');
+      return response.json();
+    },
+    getRelationshipCounts: async (surchargeId: string) => {
+      const [products, suppliers] = await Promise.all([
+        fetch(`/api/surcharges/${surchargeId}/products`).then(r => r.json()),
+        fetch(`/api/surcharges/${surchargeId}/suppliers`).then(r => r.json()),
+      ]);
+      return {
+        productCount: products.length,
+        supplierCount: suppliers.length,
+      };
+    },
+    updateSortOrder: async (updates: { id: string; sort_order: number }[]) => {
+      const response = await fetch('/api/surcharges/update-sort-order', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      });
+      if (!response.ok) throw new Error('Failed to update sort order');
       return response.json();
     },
   },

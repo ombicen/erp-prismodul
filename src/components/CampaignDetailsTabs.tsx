@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SpreadsheetGrid, GridColumn } from './SpreadsheetGrid';
 import { Plus, X } from 'lucide-react';
 
@@ -114,6 +114,15 @@ export function CampaignDetailsTabs({
     { id: 'd3', code: 'AVD-003', name: 'Produktion' },
   ];
 
+  // Dropdown options for discount type
+  const discountTypeOptions = useMemo(
+    () => [
+      { label: 'Procent (%)', value: '%' },
+      { label: 'Kronor (KR)', value: 'KR' },
+    ],
+    [],
+  );
+
   const customerColumns: GridColumn[] = [
     {
       field: 'customer_number',
@@ -204,27 +213,16 @@ export function CampaignDetailsTabs({
       headerName: 'Rabatttyp',
       width: 100,
       editable: true,
+      isEditable: (row: any) => row?.product_type !== 'single',
+      cellType: 'customDropdown',
+      dropdownOptions: () => discountTypeOptions,
       cellRenderer: (value: any, row: any) => {
-        // For single products, always show %
+        // For single products, always show % (non-editable)
         if (row?.product_type === 'single') {
           return <span className="text-slate-600">%</span>;
         }
-        // For categories, show editable dropdown
-        return (
-          <select
-            value={value || '%'}
-            onChange={(e) => {
-              setProducts(prev => prev.map(p =>
-                p.id === row?.id ? { ...p, discount_type: e.target.value as '%' | 'KR' } : p
-              ));
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="%">%</option>
-            <option value="KR">KR</option>
-          </select>
-        );
+        // For categories, use the dropdown
+        return undefined;
       },
     },
     {

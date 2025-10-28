@@ -14,6 +14,7 @@ export async function GET(
   try {
     const { id: productId } = await params;
 
+    // Get surcharges via ProductSurcharge junction table
     const productSurcharges = await prisma.productSurcharge.findMany({
       where: {
         product_id: productId,
@@ -38,7 +39,7 @@ export async function GET(
         description: ps.surcharge.description,
         cost_type: ps.surcharge.cost_type,
         cost_value: ps.surcharge.cost_value.toNumber(),
-        scope_type: ps.surcharge.scope_type,
+        type: ps.surcharge.type,
         is_active: ps.surcharge.is_active,
       },
     }));

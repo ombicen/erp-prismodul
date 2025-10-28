@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     id: string;
     productId: string;
-  };
+  }>;
 }
 
 export async function DELETE(
@@ -13,15 +13,15 @@ export async function DELETE(
   { params }: RouteParams
 ) {
   try {
-    const surchargeId = params.id;
-    const productId = params.productId;
+    const resolvedParams = await params;
+    const surchargeId = resolvedParams.id;
+    const productId = resolvedParams.productId;
 
-    await prisma.productSurcharge.delete({
+    // Find and delete the relationship
+    await prisma.productSurcharge.deleteMany({
       where: {
-        surcharge_id_product_id: {
-          surcharge_id: surchargeId,
-          product_id: productId,
-        },
+        product_id: productId,
+        surcharge_id: surchargeId,
       },
     });
 

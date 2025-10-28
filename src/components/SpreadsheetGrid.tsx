@@ -12,9 +12,12 @@ import {
   CheckboxCell,
   OptionType,
   DefaultCellTypes,
+  Id,
+  DropPosition,
 } from '@silevis/reactgrid';
 import '@silevis/reactgrid/styles.css';
 import { useMemo, useState, useCallback, ReactNode, useEffect, useRef } from 'react';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import {
   AutocompleteCell,
   AutocompleteCellTemplate,
@@ -35,9 +38,13 @@ interface SpreadsheetGridProps<T = any> {
   onCellValueChanged?: (rowId: string, field: string, newValue: any) => void;
   onRowClicked?: (row: T) => void;
   onCellClicked?: (row: T, field: string) => void;
+  onDeleteRows?: (rowIds: string[]) => void; // Called when Delete key is pressed with selected rows
+  onRowsReordered?: (targetRowId: string, rowIds: string[], dropPosition: 'before' | 'after') => void; // Called when rows are reordered via drag & drop
   height?: string;
   className?: string;
   showFilter?: boolean; // Toggle filter row visibility
+  sortable?: boolean; // Enable column sorting
+  reorderable?: boolean; // Enable row reordering via drag & drop
 }
 
 export interface GridColumn {
@@ -56,6 +63,7 @@ export interface GridColumn {
   filterTextGetter?: (value: any, row: any) => string;
   // If true, column keeps fixed width and is excluded from proportional growth
   fixed?: boolean;
+  sortable?: boolean; // If false, column won't be sortable even if grid sortable is true
   dropdownOptions?: OptionType[] | ((row: any) => OptionType[]);
   dropdownPlaceholder?: string;
   numberFormat?: Intl.NumberFormat;
@@ -77,9 +85,13 @@ export function SpreadsheetGrid<T = any>({
   onCellValueChanged,
   onRowClicked,
   onCellClicked,
+  onDeleteRows,
+  onRowsReordered,
   height = '600px',
   className = '',
   showFilter = true, // Default to showing filter
+  sortable = false, // Default to not sortable
+  reorderable = false, // Default to not reorderable
 }: SpreadsheetGridProps<T>) {
 
   // State to track filter values for each column
@@ -87,6 +99,9 @@ export function SpreadsheetGrid<T = any>({
 
   // State to track dropdown isOpen state per row and field
   const [dropdownStates, setDropdownStates] = useState<Record<string, Record<string, boolean>>>({});
+
+  // State to track sort configuration
+  const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' } | null>(null);
 
   // Track and persist column widths (resizable)
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -179,15 +194,42 @@ export function SpreadsheetGrid<T = any>({
     }));
   }, [columns, columnWidths]);
 
+  // Handler for column header clicks (sorting)
+  const handleHeaderClick = useCallback((columnId: string) => {
+    if (!sortable) return;
+
+    const column = columns.find(col => col.field === columnId);
+    if (column && column.sortable === false) return;
+
+    setSortConfig(prev => {
+      if (!prev || prev.field !== columnId) {
+        return { field: columnId, direction: 'asc' };
+      }
+      if (prev.direction === 'asc') {
+        return { field: columnId, direction: 'desc' };
+      }
+      return null; // Remove sort
+    });
+  }, [sortable, columns]);
+
   // Create header row
   const headerRow: Row = useMemo(() => ({
     rowId: 'header',
     height: 48,
-    cells: columns.map(col => ({
-      type: 'header',
-      text: col.headerName,
-    })),
-  }), [columns]);
+    cells: columns.map(col => {
+      let headerText = col.headerName;
+
+      // Add sort indicator if sortable
+      if (sortable && col.sortable !== false && sortConfig?.field === col.field) {
+        headerText += sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
+      }
+
+      return {
+        type: 'header',
+        text: headerText,
+      };
+    }),
+  }), [columns, sortable, sortConfig]);
 
   // Create filter row
   const filterRow: Row = useMemo(() => ({
@@ -196,38 +238,67 @@ export function SpreadsheetGrid<T = any>({
     cells: columns.map(col => ({
       type: 'text',
       text: filters[col.field] || '',
-      placeholder: `Filter...`,
+      placeholder: `Filtrera...`,
     } as TextCell)),
   }), [columns, filters]);
 
-  // Filter the data based on filter values
+  // Filter and sort the data
 const filteredData = useMemo(() => {
-    if (Object.keys(filters).length === 0 || Object.values(filters).every(v => !v)) {
-      return data;
+    // First, apply filters
+    let result = data;
+
+    if (Object.keys(filters).length > 0 && Object.values(filters).some(v => v)) {
+      result = data.filter((item: any) => {
+        return Object.entries(filters).every(([field, filterValue]) => {
+          if (!filterValue) return true;
+
+          const column = columns.find(col => col.field === field);
+          const value = column?.valueGetter ? column.valueGetter(item) : item[field];
+
+          // Get display text for filtering (prefer explicit filterTextGetter, then valueFormatter)
+          let displayValue: string;
+          if (column?.filterTextGetter) {
+            displayValue = column.filterTextGetter(value, item);
+          } else if (column?.valueFormatter) {
+            displayValue = column.valueFormatter(value);
+          } else {
+            displayValue = value != null ? String(value) : '';
+          }
+
+          // Case-insensitive partial match
+          return displayValue.toLowerCase().includes(filterValue.toLowerCase());
+        });
+      });
     }
 
-    return data.filter((item: any) => {
-      return Object.entries(filters).every(([field, filterValue]) => {
-        if (!filterValue) return true;
+    // Then, apply sorting if enabled
+    if (sortConfig) {
+      const column = columns.find(col => col.field === sortConfig.field);
+      result = [...result].sort((a: any, b: any) => {
+        const aValue = column?.valueGetter ? column.valueGetter(a) : a[sortConfig.field];
+        const bValue = column?.valueGetter ? column.valueGetter(b) : b[sortConfig.field];
 
-        const column = columns.find(col => col.field === field);
-        const value = item[field];
+        // Handle null/undefined
+        if (aValue == null && bValue == null) return 0;
+        if (aValue == null) return 1;
+        if (bValue == null) return -1;
 
-        // Get display text for filtering (prefer explicit filterTextGetter, then valueFormatter)
-        let displayValue: string;
-        if (column?.filterTextGetter) {
-          displayValue = column.filterTextGetter(value, item);
-        } else if (column?.valueFormatter) {
-          displayValue = column.valueFormatter(value);
+        // Compare values
+        let comparison = 0;
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          comparison = aValue - bValue;
+        } else if (typeof aValue === 'string' && typeof bValue === 'string') {
+          comparison = aValue.localeCompare(bValue);
         } else {
-          displayValue = value != null ? String(value) : '';
+          comparison = String(aValue).localeCompare(String(bValue));
         }
 
-        // Case-insensitive partial match
-        return displayValue.toLowerCase().includes(filterValue.toLowerCase());
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
       });
-    });
-}, [data, filters, columns]);
+    }
+
+    return result;
+}, [data, filters, columns, sortConfig]);
 
 // Convert data rows to ReactGrid format
 const dataRows: Row[] = useMemo(() => {
@@ -311,7 +382,7 @@ const dataRows: Row[] = useMemo(() => {
           const selectedValue = value != null ? String(value) : undefined;
 
           // Check if this row has an isOpen state for this field from internal state
-          const rowId = (item as any).id || `row-${dataArray.indexOf(item)}`;
+          const rowId = (item as any).id || `row-${idx}`;
           const isOpen = dropdownStates[rowId]?.[col.field] || false;
 
           const dropdownCell: DropdownCell = {
@@ -359,13 +430,14 @@ const dataRows: Row[] = useMemo(() => {
           const autocompleteCell: AutocompleteCell = {
             type: 'autocomplete',
             text: textValue,
+            value: 0,
             selectedValue,
             options,
             placeholder: col.autocompletePlaceholder,
             allowCreate: Boolean(col.onCreateAutocompleteOption && isEditable),
             createOptionLabel: col.autocompleteCreateLabel,
             onCreateOption: col.onCreateAutocompleteOption
-              ? async (input: string) => col.onCreateAutocompleteOption?.(input, item)
+              ? async (input: string) => (col.onCreateAutocompleteOption?.(input, item) ?? null)
               : undefined,
             isDisabled: !isEditable,
             nonEditable: !isEditable,
@@ -423,7 +495,7 @@ const dataRows: Row[] = useMemo(() => {
 
       return {
         rowId,
-        height: 42,
+        height: 32,
         cells: cells as any, // Cast to any to allow custom cell types
       };
     });
@@ -447,6 +519,95 @@ const dataRows: Row[] = useMemo(() => {
   // Handle cell changes
   const handleChanges = useCallback(
     (changes: CellChange[]) => {
+      // First, detect if this is a row deletion operation
+      // This happens when Delete key is pressed with row(s) selected
+      // We'll see multiple cells from the same row being cleared
+      const rowChanges = new Map<string, CellChange[]>();
+
+      changes.forEach(change => {
+        const rowId = change.rowId as string;
+        if (rowId !== 'header' && rowId !== 'filter') {
+          if (!rowChanges.has(rowId)) {
+            rowChanges.set(rowId, []);
+          }
+          rowChanges.get(rowId)!.push(change);
+        }
+      });
+
+      // Check if this looks like a row deletion (multiple cells cleared in same row)
+      const potentialDeletionRows: string[] = [];
+
+      rowChanges.forEach((rowChangesList, rowId) => {
+        // For a true deletion, we expect changes to MOST editable columns in the row
+        // A single cell edit will only have 1-2 changes
+        // Get the number of editable columns
+        const editableColumnsCount = columns.filter(col => col.editable !== false).length;
+
+        console.log('Row deletion check:', {
+          rowId,
+          changesCount: rowChangesList.length,
+          editableColumnsCount,
+          threshold: Math.max(3, Math.floor(editableColumnsCount * 0.5)),
+        });
+
+        // If we have changes for at least 50% of editable columns, and they're all being cleared
+        if (rowChangesList.length >= Math.max(3, Math.floor(editableColumnsCount * 0.5))) {
+          const allCleared = rowChangesList.every(change => {
+            const newCell = change.newCell as any;
+
+            console.log('Checking cell:', {
+              col: change.columnId,
+              type: newCell.type,
+              text: newCell.text,
+              value: newCell.value,
+              isDropdown: newCell.type === 'customDropdown' || newCell.type === 'dropdown'
+            });
+
+            // Ignore dropdown cells - they shouldn't prevent deletion
+            if (newCell.type === 'customDropdown' || newCell.type === 'dropdown') {
+              console.log('  -> Ignoring dropdown cell');
+              return true; // Don't block deletion based on dropdown values
+            }
+
+            // Check if the new value is empty/null/undefined for other cell types
+            if (newCell.type === 'text') {
+              const text = (newCell as TextCell).text;
+              const result = text === '' || text === null || text === undefined;
+              console.log('  -> Text cell cleared?', result, 'text value:', text);
+              return result;
+            }
+            if (newCell.type === 'number') {
+              const num = (newCell as NumberCell).value;
+              const result = num === 0 || num === null || num === undefined || Number.isNaN(num);
+              console.log('  -> Number cell cleared?', result, 'num value:', num);
+              return result;
+            }
+
+            // For unknown cell types, don't consider them as cleared
+            console.log('  -> Unknown cell type, returning false');
+            return false;
+          });
+
+          console.log('All cleared?', allCleared, rowChangesList.map(c => ({
+            col: c.columnId,
+            type: (c.newCell as any).type,
+            value: (c.newCell as any).text || (c.newCell as any).value || (c.newCell as any).selectedValue
+          })));
+
+          if (allCleared) {
+            potentialDeletionRows.push(rowId);
+          }
+        }
+      });
+
+      // If we detected potential row deletions and have the callback, trigger it
+      if (potentialDeletionRows.length > 0 && onDeleteRows) {
+        console.log('Triggering deletion for rows:', potentialDeletionRows);
+        onDeleteRows(potentialDeletionRows);
+        return; // Don't process individual cell changes
+      }
+
+      // Otherwise, process as normal cell updates
       changes.forEach(change => {
         const rowId = change.rowId as string;
         const columnId = change.columnId as string;
@@ -479,14 +640,14 @@ const dataRows: Row[] = useMemo(() => {
           setDropdownStates(prev => ({
             ...prev,
             [rowId]: {
-              ...prev[rowId],
-              [columnId]: dropdownCell.isOpen,
+              ...(prev[rowId] || {}),
+              [columnId]: dropdownCell.isOpen ?? false,
             },
           }));
 
           // Only trigger onCellValueChanged if the value actually changed
           if (onCellValueChanged) {
-            const oldValue = rowData ? rowData[columnId] : null;
+            const oldValue = rowData ? (rowData as any)[columnId] : null;
             const newValue = dropdownCell.inputValue ?? dropdownCell.selectedValue ?? null;
 
             if (oldValue !== newValue) {
@@ -562,7 +723,20 @@ const dataRows: Row[] = useMemo(() => {
         onCellValueChanged(rowId, columnId, newValue);
       });
     },
-    [columns, filteredData, onCellValueChanged],
+    [columns, filteredData, onCellValueChanged, onDeleteRows],
+  );
+
+  // Handle row reordering
+  const handleRowsReorder = useCallback(
+    (targetRowId: Id, rowIds: Id[], dropPosition: DropPosition) => {
+      if (!onRowsReordered) return;
+      // Convert Id to string and DropPosition to 'before' | 'after'
+      const targetId = String(targetRowId);
+      const ids = rowIds.map(id => String(id));
+      const position = dropPosition === 'before' || dropPosition === 'after' ? dropPosition : 'after';
+      onRowsReordered(targetId, ids, position);
+    },
+    [onRowsReordered]
   );
 
   // Handle row/cell clicks
@@ -597,6 +771,13 @@ const dataRows: Row[] = useMemo(() => {
       const rowIndex = parseInt(rowIdx, 10);
       const colIndex = colIdx ? parseInt(colIdx, 10) : -1;
       console.log('SpreadsheetGrid: Row index:', rowIndex, 'Col index:', colIndex);
+
+      // Check if this is a header row click for sorting
+      if (rowIndex === 0 && sortable && colIndex >= 0 && colIndex < columns.length) {
+        console.log('SpreadsheetGrid: Header click for sorting');
+        handleHeaderClick(columns[colIndex].field);
+        return;
+      }
 
       // Skip header row (and filter row if present)
       const headerRowCount = showFilter ? 2 : 1;
@@ -637,7 +818,7 @@ const dataRows: Row[] = useMemo(() => {
       container.addEventListener('click', handleClick as EventListener);
       return () => container.removeEventListener('click', handleClick as EventListener);
     }
-  }, [onRowClicked, onCellClicked, filteredData, columns, showFilter]);
+  }, [onRowClicked, onCellClicked, filteredData, columns, showFilter, sortable, handleHeaderClick]);
 
   return (
     <div ref={containerRef} className={className} style={{ height, width: '100%'}}>
@@ -653,6 +834,7 @@ const dataRows: Row[] = useMemo(() => {
           const id = String(columnId);
           setColumnWidths(prev => ({ ...prev, [id]: width }));
         }}
+        onRowsReordered={reorderable ? handleRowsReorder : undefined}
         minColumnWidth={60}
         enableRangeSelection
         enableFillHandle

@@ -22,7 +22,7 @@ import { DetailsTabs } from '../components/DetailsTabs';
 
 
 
-import { Package } from 'lucide-react';
+import { Package, Trash2 } from 'lucide-react';
 
 
 
@@ -92,54 +92,35 @@ interface ProductSupplier {
 
 
 
-interface ProductSurcharge {
-
-
-
+interface Surcharge {
   id: string;
+  name: string;
+  description?: string;
+  cost_type: '%' | 'KR';
+  cost_value: number;
+  scope_type: 'product' | 'supplier';
+  scope_id: string;
+  scope_name?: string; // Display name for the linked entity
+  is_active: boolean;
+  created_at: string;
+  computed_amount?: number; // Calculated amount for display
+}
 
-
-
+// For backward compatibility with existing code
+interface ProductSurcharge {
+  id: string;
   surcharge_id: string;
-
-
-
   product_id: string;
-
-
-
+  scope_type: 'product' | 'supplier';
+  scope_id: string;
   surcharge: {
-
-
-
     id: string;
-
-
-
     name: string;
-
-
-
     cost_type: '%' | 'KR';
-
-
-
     cost_value: number;
-
-
-
-    scope_type: string;
-
-
-
+    scope_type: 'product' | 'supplier';
   };
-
-
-
   computed_amount?: number;
-
-
-
 }
 
 
@@ -149,6 +130,7 @@ interface ProductSurcharge {
 
 
 const NEW_SUPPLIER_ROW_ID = 'new-supplier-row';
+const NEW_SURCHARGE_ROW_ID = 'new-surcharge-row';
 const LEGACY_BRAND_KEY = 'varum\u00E4rke';
 const LEGACY_UNIT_KEY = 'enhet';
 
@@ -327,6 +309,14 @@ export function ProductsView() {
 
 
   const [productSurcharges, setProductSurcharges] = useState<ProductSurcharge[]>([]);
+  const [surchargesLoading, setSurchargesLoading] = useState(false);
+  const [allSurcharges, setAllSurcharges] = useState<any[]>([]);
+  const [newSurchargeData, setNewSurchargeData] = useState({
+    name: '',
+    cost_type: '%' as '%' | 'KR',
+    cost_value: 0,
+    scope_type: 'product' as 'product' | 'supplier',
+  });
 
 
 
@@ -339,10 +329,20 @@ export function ProductsView() {
 
 
     loadProducts();
+    loadAllSurcharges();
 
 
 
   }, []);
+
+  const loadAllSurcharges = async () => {
+    try {
+      const data = await api.surcharges.getAll();
+      setAllSurcharges(data);
+    } catch (error) {
+      console.error('Error loading surcharges:', error);
+    }
+  };
 
 
 
@@ -631,18 +631,25 @@ export function ProductsView() {
 
 
   const loadProductSurcharges = async (productId: string) => {
-
-
+    setSurchargesLoading(true);
 
     try {
 
+      // Load product-scoped surcharges
+      const productSurcharges = await api.surcharges.getByProduct(productId);
 
+      // Load supplier-scoped surcharges for all suppliers of this product
+      const suppliers = await api.productSuppliers.getByProduct(productId);
+      const supplierSurchargesPromises = suppliers.map((supplier: ProductSupplier) =>
+        api.productSuppliers.getSurcharges(supplier.id)
+      );
+      const supplierSurchargesArrays = await Promise.all(supplierSurchargesPromises);
+      const supplierSurcharges = supplierSurchargesArrays.flat();
 
-      const data = await api.surcharges.getByProduct(productId);
+      // Combine both types
+      const allSurcharges = [...productSurcharges, ...supplierSurcharges];
 
-
-
-      setProductSurcharges(data);
+      setProductSurcharges(allSurcharges);
 
 
 
@@ -654,6 +661,8 @@ export function ProductsView() {
 
 
 
+    } finally {
+      setSurchargesLoading(false);
     }
 
 
@@ -1020,6 +1029,67 @@ export function ProductsView() {
     return;
   }
 
+  // Handle supplier change: manage surcharges in the UI
+  if (field === 'supplier_id' && selectedProduct) {
+    const oldSupplierId = currentSupplier.supplier_id;
+    const newSupplierId = processedValue;
+
+    console.log('Supplier change detected:', { oldSupplierId, newSupplierId, productId: selectedProduct.id });
+
+    try {
+      // Step 1: Update the supplier in the database first
+      await api.productSuppliers.update(rowId, { [field]: processedValue });
+      console.log('Updated product supplier');
+
+      // Step 2: Update surcharges in the state
+      setSurchargesLoading(true);
+
+      // Remove all supplier-type surcharges from the state
+      const productOnlySurcharges = productSurcharges.filter(ps =>
+        ps.surcharge?.scope_type !== 'supplier'
+      );
+      console.log('Removed supplier surcharges, keeping product surcharges:', productOnlySurcharges.length);
+
+      // Step 3: Get new supplier's surcharges and add them to state
+      let newSurcharges = productOnlySurcharges;
+      if (newSupplierId) {
+        try {
+          const supplierSurcharges = await api.suppliers.getSurcharges(newSupplierId);
+          console.log('New supplier surcharges to add:', supplierSurcharges.length);
+
+          // Add the new supplier surcharges to the state
+          newSurcharges = [...productOnlySurcharges, ...supplierSurcharges];
+        } catch (err) {
+          console.warn('Could not fetch new supplier surcharges:', err);
+        }
+      }
+
+      // Update the surcharges state
+      setProductSurcharges(newSurcharges);
+      setSurchargesLoading(false);
+      console.log('Updated surcharges state');
+
+      // Step 4: Update local supplier state
+      setProductSuppliers(prev =>
+        prev.map(supplier => {
+          if (supplier.id === rowId) {
+            const nextSupplier: any = { ...supplier, [field]: processedValue };
+            const supplierInfo = allSuppliers.find(s => s.id === processedValue);
+            nextSupplier.supplier_name =
+              supplierInfo?.name ?? selectedLabel ?? supplier.supplier_name ?? '';
+            return nextSupplier;
+          }
+          return supplier;
+        }),
+      );
+    } catch (error) {
+      console.error('Error updating product supplier and surcharges:', error);
+      setSurchargesLoading(false);
+    }
+    return;
+  }
+
+  // For non-supplier_id changes, use the original logic
   setProductSuppliers(prev =>
     prev.map(supplier => {
       if (supplier.id === rowId) {
@@ -1040,7 +1110,7 @@ export function ProductsView() {
   } catch (error) {
     console.error('Error updating product supplier:', error);
   }
-}, [allSuppliers, api, setProductSuppliers, setNewSupplierDraft]);
+}, [allSuppliers, api, setProductSuppliers, setNewSupplierDraft, selectedProduct, loadProductSurcharges, productSuppliers]);
 
 const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
@@ -1184,7 +1254,134 @@ const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
   }, [selectedProduct, productSuppliers, setProductSuppliers, setSelectedSupplierId, setNewSupplierDraft, setIsCreatingSupplier]);
 
+const handleSurchargeCellValueChange = useCallback(async (rowId: string, field: string, rawValue: any) => {
+  // Handle new surcharge row
+  if (rowId === NEW_SURCHARGE_ROW_ID) {
+    let updatedData = { ...newSurchargeData };
 
+    // Handle name field - can be either existing surcharge selection or new name input
+    if (field === 'name') {
+      if (typeof rawValue === 'object' && rawValue?.value) {
+        // Selecting an existing surcharge - create product surcharge relationship
+        if (!selectedProduct) return;
+
+        try {
+          await api.surcharges.addProduct(rawValue.value, selectedProduct.id);
+
+          // Reload product surcharges
+          const updated = await api.surcharges.getByProduct(selectedProduct.id);
+          setProductSurcharges(updated);
+          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product' });
+        } catch (error) {
+          console.error('Error creating product surcharge:', error);
+        }
+      } else {
+        // Entering a new surcharge name
+        updatedData.name = rawValue || '';
+        setNewSurchargeData(updatedData);
+      }
+      return;
+    }
+
+    // Handle scope_type field
+    if (field === 'scope_type') {
+      updatedData.scope_type = rawValue as 'product' | 'supplier';
+      setNewSurchargeData(updatedData);
+      return;
+    }
+
+    // Handle cost_type field
+    if (field === 'cost_type') {
+      updatedData.cost_type = rawValue as '%' | 'KR';
+      setNewSurchargeData(updatedData);
+      return;
+    }
+
+    // Handle cost_value field
+    if (field === 'cost_value') {
+      const valueAsNumber = Number(rawValue);
+      updatedData.cost_value = Number.isFinite(valueAsNumber) ? valueAsNumber : 0;
+      setNewSurchargeData(updatedData);
+
+      // Only create surcharge when Värde field is filled and all required fields are present
+      const hasName = updatedData.name && updatedData.name.trim().length > 0;
+      const hasCostType = updatedData.cost_type && (updatedData.cost_type === '%' || updatedData.cost_type === 'KR');
+      const hasCostValue = Number.isFinite(updatedData.cost_value) && updatedData.cost_value !== 0;
+
+      if (hasName && hasCostType && hasCostValue) {
+        if (!selectedProduct) return;
+
+        try {
+          // Determine scope based on selected type
+          const scopeType = updatedData.scope_type || 'product';
+          let scopeId = selectedProduct.id;
+
+          // If supplier type, use the selected supplier's ID
+          if (scopeType === 'supplier') {
+            if (!selectedSupplierId) {
+              console.error('No supplier selected for supplier-scoped surcharge');
+              return;
+            }
+            scopeId = selectedSupplierId;
+          }
+
+          // Create the new surcharge
+          const newSurcharge = await api.surcharges.create({
+            name: updatedData.name.trim(),
+            cost_type: updatedData.cost_type,
+            cost_value: updatedData.cost_value,
+            scope_type: scopeType,
+            scope_id: scopeId,
+            is_active: true,
+          });
+
+          // Reload surcharges
+          await loadProductSurcharges(selectedProduct.id);
+          setNewSurchargeData({ name: '', cost_type: '%', cost_value: 0, scope_type: 'product' });
+          await loadAllSurcharges(); // Reload to include the new surcharge
+        } catch (error) {
+          console.error('Error creating surcharge:', error);
+        }
+      }
+      return;
+    }
+
+    // Other fields
+    updatedData = { ...updatedData, [field]: rawValue };
+    setNewSurchargeData(updatedData);
+    return;
+  }
+
+  // Handle existing surcharge updates
+  if (!selectedProduct) return;
+
+  // Find the surcharge to update
+  const surchargeToUpdate = productSurcharges.find(ps => ps.id === rowId);
+  if (!surchargeToUpdate) return;
+
+  try {
+    // Update the surcharge based on field
+    if (field === 'cost_type' || field === 'cost_value') {
+      // Update the surcharge itself
+      const updateData: any = {};
+
+      if (field === 'cost_type') {
+        updateData.cost_type = rawValue;
+      } else if (field === 'cost_value') {
+        updateData.cost_value = Number(rawValue) || 0;
+      }
+
+      await api.surcharges.update(surchargeToUpdate.surcharge_id, updateData);
+
+      // Reload surcharges
+      const updated = await api.surcharges.getByProduct(selectedProduct.id);
+      setProductSurcharges(updated);
+      await loadAllSurcharges(); // Reload all surcharges to reflect changes
+    }
+  } catch (error) {
+    console.error('Error updating surcharge:', error);
+  }
+}, [selectedProduct, productSurcharges, newSurchargeData, api, setProductSurcharges, loadAllSurcharges, selectedSupplierId, loadProductSurcharges]);
 
 
 
@@ -1252,13 +1449,20 @@ const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
     }
 
+    // Filter surcharges based on scope:
+    // - Product surcharges (scope_type === 'product'): always apply
+    // - Supplier surcharges (scope_type === 'supplier'): only if scope_id matches selected supplier
+    const applicableSurcharges = productSurcharges.filter(p => {
+      if (p.scope_type === 'product') {
+        return true; // Product surcharges always apply
+      } else if (p.scope_type === 'supplier') {
+        // Supplier surcharges only apply if they match the selected supplier's ProductSupplier ID
+        return p.scope_id === selectedSupplier.id;
+      }
+      return false;
+    });
 
-
-
-
-
-
-    return productSurcharges.map(p => {
+    return applicableSurcharges.map(p => {
 
 
 
@@ -1358,40 +1562,19 @@ const createSupplierFromDraft = useCallback(async (draft: NewSupplierDraft) => {
 
 
 
-const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
-  () => allSuppliers.map(option => ({ label: option.name, value: option.id })),
-  [allSuppliers],
-);
-
-  const freightDropdownOptions = useMemo(
-
-
-
-    () =>
-
-
-
-      [0, 5, 8, 10, 15, 20, 25, 30].map(value => ({
-
-
-
-        label: `${value} kr`,
-
-
-
-        value: String(value),
-
-
-
-      })),
-
-
-
-    [],
-
-
-
+const supplierDropdownOptions = useMemo<AutocompleteOption[]>(() => {
+  // Get IDs of already added suppliers
+  const addedSupplierIds = new Set(
+    productSuppliers
+      .filter(ps => ps.supplier_id) // Exclude the new row
+      .map(ps => ps.supplier_id)
   );
+
+  // Filter out already added suppliers
+  return allSuppliers
+    .filter(s => !addedSupplierIds.has(s.id))
+    .map(option => ({ label: option.name, value: option.id }));
+}, [allSuppliers, productSuppliers]);
 
 
 
@@ -1575,38 +1758,114 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
 
 
+  const surchargesWithNewRow = useMemo(() => {
+    const newRow: ProductSurcharge & { id: string; surcharge_id: string } = {
+      id: NEW_SURCHARGE_ROW_ID,
+      surcharge_id: '',
+      product_id: selectedProduct?.id || '',
+      scope_type: newSurchargeData.scope_type || 'product',
+      scope_id: newSurchargeData.scope_type === 'supplier' ? selectedSupplierId : (selectedProduct?.id || ''),
+      surcharge: {
+        id: '',
+        name: newSurchargeData.name || '',
+        cost_type: newSurchargeData.cost_type,
+        cost_value: newSurchargeData.cost_value,
+        scope_type: newSurchargeData.scope_type || 'product',
+      },
+      computed_amount: 0,
+    };
+    return [...productSurcharges, newRow];
+  }, [productSurcharges, newSurchargeData, selectedProduct, selectedSupplierId]);
+
+  const surchargeDropdownOptions = useMemo(() => {
+    // Get IDs of already added surcharges
+    const addedSurchargeIds = new Set(
+      productSurcharges
+        .filter(ps => ps.surcharge_id) // Exclude the new row
+        .map(ps => ps.surcharge_id)
+    );
+
+    // Filter out already added surcharges - only show product-scoped surcharges
+    return allSurcharges
+      .filter(s => s.scope_type === 'product' && s.is_active && !addedSurchargeIds.has(s.id))
+      .map(s => ({
+        value: s.id,
+        label: s.name,
+      }));
+  }, [allSurcharges, productSurcharges]);
+
+  const costTypeOptions = useMemo(
+    () => [
+      { label: 'Procent (%)', value: '%' },
+      { label: 'Kronor (KR)', value: 'KR' },
+    ],
+    [],
+  );
+
+  const scopeTypeOptions = useMemo(
+    () => [
+      { label: 'Produkt', value: 'product' },
+      { label: 'Leverantör', value: 'supplier' },
+    ],
+    [],
+  );
+
   const surchargeColumns = useMemo<GridColumn[]>(() => [
-
-
-
     {
-
-
-
       field: 'name',
-
-
-
-      headerName: 'Surcharge',
-
-
-
+      headerName: 'Påslag',
       width: 200,
+      editable: true,
+      isEditable: (row: any) => true, // Allow editing all rows
+      cellType: 'autocomplete',
+      autocompletePlaceholder: 'Skriv påslagsnamn...',
+      autocompleteOptions: () => surchargeDropdownOptions,
+      autocompleteCreateLabel: 'Skapa "{input}"',
+      onCreateAutocompleteOption: async (input: string, row: any) => {
+        // Check if a surcharge with this name already exists in productSurcharges
+        const existingInProduct = productSurcharges.find(
+          ps => ps.surcharge?.name?.toLowerCase() === input.trim().toLowerCase()
+        );
 
+        if (existingInProduct) {
+          // Don't allow creating - this surcharge is already added to the product
+          return null;
+        }
 
+        // Check if a surcharge with this name exists in allSurcharges (but not yet added to product)
+        const existingInAll = allSurcharges.find(
+          s => s.name?.toLowerCase() === input.trim().toLowerCase()
+        );
 
-      editable: false,
+        if (existingInAll) {
+          // Don't allow creating - suggest selecting from dropdown instead
+          return null;
+        }
 
-
-
+        // Allow creating new surcharge - we'll create it when all fields are filled
+        return { value: input, label: input };
+      },
+      filterTextGetter: (_value: any, row: any) => row.surcharge?.name || '',
       valueGetter: (params: any) => params.surcharge?.name || '',
-
-
-
+      valueParser: (cell) => {
+        const autocompleteCell = cell as any;
+        return autocompleteCell.text ?? autocompleteCell.selectedValue ?? '';
+      },
     },
-
-
-
+    {
+      field: 'scope_type',
+      headerName: 'Typ',
+      width: 140,
+      editable: true,
+      sortable: true,
+      cellType: 'customDropdown',
+      dropdownOptions: () => scopeTypeOptions,
+      valueGetter: (row: any) => row.surcharge?.type || row.scope_type || 'product',
+      filterTextGetter: (_value: any, row: any) => {
+        const scopeType = row.surcharge?.type || row.scope_type || 'product';
+        return scopeType === 'product' ? 'Produkt' : 'Leverantör';
+      },
+    },
     {
 
 
@@ -1615,23 +1874,20 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
 
 
-      headerName: 'Type',
+      headerName: 'Enhet',
 
 
 
-      width: 100,
+      width: 120,
 
 
 
-      editable: false,
-
-
-
+      editable: true,
+      isEditable: (row: any) => true, // Allow editing all rows
+      cellType: 'customDropdown',
+      dropdownOptions: () => costTypeOptions,
       valueGetter: (params: any) => params.surcharge?.cost_type || '%',
-
-
-
-      cellRenderer: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
+      filterTextGetter: (value: any) => value === '%' ? 'Procent (%)' : 'Kronor (KR)',
 
 
 
@@ -1647,7 +1903,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
 
 
-      headerName: 'Value',
+      headerName: 'Värde',
 
 
 
@@ -1655,27 +1911,12 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
 
 
-      type: 'number',
-
-
-
-      editable: false,
-
-
-
+      cellType: 'number',
+      editable: true,
+      isEditable: (row: any) => true, // Allow editing all rows
       valueGetter: (params: any) => params.surcharge?.cost_value || 0,
-
-
-
-      cellRenderer: (value: any, row: any) => {
-
-
-
-        return row.surcharge?.cost_type === '%' ? `${value}%` : `${value} kr`;
-
-
-
-      },
+      // Removed cellRenderer to allow editing in new row
+      // Note: existing rows will show plain numbers without % or kr suffix
 
 
 
@@ -1684,38 +1925,55 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
 
     {
-
-
-
       field: 'computed_amount',
-
-
-
-      headerName: 'Amount',
-
-
-
+      headerName: 'Summa',
       width: 140,
-
-
-
       type: 'number',
-
-
-
       editable: false,
-
-
-
       valueFormatter: (value) => `${Number(value).toFixed(2)} kr`,
+    },
+    {
+      field: 'actions',
+      headerName: '',
+      width: 30,
+      editable: false,
+      cellRenderer: (_value: any, row: any) => {
+        // Don't show delete button for new row
+        if (row.id === NEW_SURCHARGE_ROW_ID) {
+          return null;
+        }
 
+        return (
+          <div className="flex items-center justify-center h-full">
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!selectedProduct) return;
 
+                try {
+                  // Remove the product surcharge
+                  await api.surcharges.removeProduct(row.surcharge_id, selectedProduct.id);
 
+                  // Reload the surcharges
+                  const updated = await api.surcharges.getByProduct(selectedProduct.id);
+                  setProductSurcharges(updated);
+                } catch (error) {
+                  console.error('Error removing surcharge:', error);
+                }
+              }}
+              className="p-1 hover:bg-red-50 rounded transition-colors"
+              title="Ta bort påslag"
+            >
+              <Trash2 className="w-4 h-4 text-red-600" />
+            </button>
+          </div>
+        );
+      },
     },
 
 
 
-  ], []);
+  ], [surchargeDropdownOptions, costTypeOptions, scopeTypeOptions, selectedProduct, api, setProductSurcharges]);
 
 
 
@@ -1729,7 +1987,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
     field: 'selected',
 
-    headerName: 'Select',
+    headerName: 'Välj',
 
     width: 80,
 
@@ -1743,7 +2001,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
           <div className="flex items-center justify-center text-xs text-slate-400 h-full">
 
-            New
+            Ny
 
           </div>
 
@@ -1826,15 +2084,36 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
   {
 
     field: 'supplier_id',
-    headerName: 'Supplier',
+    headerName: 'Leverantör',
     width: 220,
     editable: true,
-    isEditable: (row: any) => row.id === NEW_SUPPLIER_ROW_ID,
+    isEditable: (row: any) => true, // Allow editing all rows
     cellType: 'autocomplete',
-    autocompletePlaceholder: 'Select supplier...',
+    autocompletePlaceholder: 'Välj leverantör...',
     autocompleteOptions: () => supplierDropdownOptions,
-    autocompleteCreateLabel: 'Create "{input}"',
-    onCreateAutocompleteOption: async (input: string) => {
+    autocompleteCreateLabel: 'Skapa "{input}"',
+    onCreateAutocompleteOption: async (input: string, row: any) => {
+      // Check if a supplier with this name already exists in productSuppliers
+      const existingInProduct = productSuppliers.find(
+        ps => ps.supplier_name?.toLowerCase() === input.trim().toLowerCase()
+      );
+
+      if (existingInProduct) {
+        // Don't allow creating - this supplier is already added to the product
+        return null;
+      }
+
+      // Check if a supplier with this name exists in allSuppliers (but not yet added to product)
+      const existingInAll = allSuppliers.find(
+        s => s.name?.toLowerCase() === input.trim().toLowerCase()
+      );
+
+      if (existingInAll) {
+        // Don't allow creating - suggest selecting from dropdown instead
+        return null;
+      }
+
+      // Create new supplier
       try {
         const newSupplier = await api.suppliers.create({
           name: input,
@@ -1847,6 +2126,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
         return null;
       }
     },
+    valueGetter: (row: any) => row.supplier_name || '',
     filterTextGetter: (_value: any, row: any) => row.supplier_name || '',
     valueParser: (cell) => ({
       value: (cell as AutocompleteCell).selectedValue ?? '',
@@ -1859,7 +2139,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
     field: 'base_price',
 
-    headerName: 'Base Price',
+    headerName: 'Grundpris',
 
     width: 120,
 
@@ -1873,27 +2153,9 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
   {
 
-    field: 'freight_cost',
-
-    headerName: 'Freight',
-
-    width: 120,
-
-    cellType: 'customDropdown',
-
-    editable: true,
-
-    dropdownOptions: () => freightDropdownOptions,
-
-    filterTextGetter: (value: any) => `${value} kr`,
-
-  },
-
-  {
-
     field: 'discount_type',
 
-    headerName: 'Discount Type',
+    headerName: 'Rabatttyp',
 
     width: 120,
 
@@ -1909,7 +2171,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
     field: 'discount_value',
 
-    headerName: 'Discount Amount',
+    headerName: 'Rabatt',
 
     width: 140,
 
@@ -1923,7 +2185,7 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
     field: 'slutpris',
 
-    headerName: 'Final Price',
+    headerName: 'Slutpris',
 
     width: 140,
 
@@ -1933,6 +2195,44 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
     numberFormat: currencyFormat,
 
+  },
+  {
+    field: 'actions',
+    headerName: '',
+    width: 30,
+    editable: false,
+    cellRenderer: (_value: any, row: any) => {
+      // Don't show delete button for new row
+      if (row.id === NEW_SUPPLIER_ROW_ID) {
+        return null;
+      }
+
+      return (
+        <div className="flex items-center justify-center h-full">
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (!selectedProduct) return;
+
+              try {
+                // Remove the product supplier
+                await api.productSuppliers.delete(row.id);
+
+                // Reload the suppliers
+                const updated = await api.productSuppliers.getByProduct(selectedProduct.id);
+                setProductSuppliers(updated);
+              } catch (error) {
+                console.error('Error removing supplier:', error);
+              }
+            }}
+            className="p-1 hover:bg-red-50 rounded transition-colors"
+            title="Ta bort leverantör"
+          >
+            <Trash2 className="w-4 h-4 text-red-600" />
+          </button>
+        </div>
+      );
+    },
   },
 
 ], [
@@ -1947,8 +2247,6 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 
   supplierDropdownOptions,
 
-  freightDropdownOptions,
-
   discountTypeOptions,
 
   api,
@@ -1958,47 +2256,47 @@ const supplierDropdownOptions = useMemo<AutocompleteOption[]>(
 const columns = useMemo<GridColumn[]>(() => [
   {
     field: 'code',
-    headerName: 'Product Code',
+    headerName: 'Produktkod',
     width: 140,
     editable: false,
   },
   {
     field: 'name',
-    headerName: 'Name',
+    headerName: 'Namn',
     width: 300,
     editable: false,
   },
   {
     field: 'brand',
-    headerName: 'Brand',
+    headerName: 'Varumärke',
     width: 150,
     editable: true,
     valueFormatter: (value) => value || '-',
   },
   {
     field: 'unit',
-    headerName: 'Unit',
+    headerName: 'Enhet',
     width: 100,
     editable: true,
     valueFormatter: (value) => value || '-',
   },
   {
     field: 'product_group_name',
-    headerName: 'Product Group',
+    headerName: 'Varugrupp',
     width: 180,
     editable: false,
     valueFormatter: (value) => value || '-',
   },
   {
     field: 'department_name',
-    headerName: 'Department',
+    headerName: 'Avdelning',
     width: 150,
     editable: false,
     valueFormatter: (value) => value || '-',
   },
   {
     field: 'purchase_price',
-    headerName: 'Purchase Price',
+    headerName: 'Inköpspris',
     width: 140,
     type: 'number',
     editable: false,
@@ -2012,7 +2310,7 @@ const columns = useMemo<GridColumn[]>(() => [
   },
   {
     field: 'sync_status',
-    headerName: 'Sync Status',
+    headerName: 'Synkstatus',
     width: 140,
     editable: false,
     fixed: true,
@@ -2527,9 +2825,13 @@ if (loading) {
 
 
 
-        <div className="overflow-visible">
+        <div className="overflow-visible relative">
 
-
+          {surchargesLoading && (
+            <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+              <div className="text-slate-600">Loading surcharges...</div>
+            </div>
+          )}
 
           <SpreadsheetGrid
 
@@ -2539,7 +2841,10 @@ if (loading) {
 
 
 
-            data={surchargesWithAmounts}
+            data={surchargesWithNewRow.map(s => ({
+              ...s,
+              computed_amount: surchargesWithAmounts.find(sa => sa.id === s.id)?.computed_amount || 0
+            }))}
 
 
 
@@ -2548,6 +2853,9 @@ if (loading) {
 
 
             showFilter={false}
+            sortable={true}
+
+            onCellValueChanged={handleSurchargeCellValueChange}
 
 
 
@@ -2632,22 +2940,6 @@ if (loading) {
 
 
                 <span className="font-medium">{selectedSupplier.base_price.toFixed(2)} kr</span>
-
-
-
-              </div>
-
-
-
-              <div className="flex justify-between">
-
-
-
-                <span className="text-slate-600">Frakt</span>
-
-
-
-                <span className="font-medium">+ {selectedSupplier.freight_cost.toFixed(2)} kr</span>
 
 
 

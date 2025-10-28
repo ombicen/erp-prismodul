@@ -181,27 +181,27 @@ async function main() {
   console.log('🔗 Creating product-supplier relationships...');
   const productSuppliers = [
     // Laptops
-    { id: 'd1111111-1111-1111-1111-111111111111', product_id: 'c1111111-1111-1111-1111-111111111111', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 1350.00, freight_cost: 25.00, discount_type: '%', discount_value: 5.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111112', product_id: 'c1111111-1111-1111-1111-111111111111', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 1300.00, freight_cost: 35.00, discount_type: 'KR', discount_value: 50.00, is_primary: false },
-    { id: 'd1111111-1111-1111-1111-111111111121', product_id: 'c1111111-1111-1111-1111-111111111112', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 2550.00, freight_cost: 30.00, discount_type: '%', discount_value: 3.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111131', product_id: 'c1111111-1111-1111-1111-111111111113', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 820.00, freight_cost: 20.00, discount_type: '%', discount_value: 2.50, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111141', product_id: 'c1111111-1111-1111-1111-111111111114', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 1640.00, freight_cost: 28.00, discount_type: '%', discount_value: 4.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111111', product_id: 'c1111111-1111-1111-1111-111111111111', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 1350.00, discount_type: '%', discount_value: 5.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111112', product_id: 'c1111111-1111-1111-1111-111111111111', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 1300.00, discount_type: 'KR', discount_value: 50.00, is_primary: false },
+    { id: 'd1111111-1111-1111-1111-111111111121', product_id: 'c1111111-1111-1111-1111-111111111112', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 2550.00, discount_type: '%', discount_value: 3.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111131', product_id: 'c1111111-1111-1111-1111-111111111113', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 820.00, discount_type: '%', discount_value: 2.50, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111141', product_id: 'c1111111-1111-1111-1111-111111111114', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 1640.00, discount_type: '%', discount_value: 4.00, is_primary: true },
 
     // Smartphones
-    { id: 'd1111111-1111-1111-1111-111111111211', product_id: 'c1111111-1111-1111-1111-111111111121', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 1050.00, freight_cost: 15.00, discount_type: '%', discount_value: 6.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111221', product_id: 'c1111111-1111-1111-1111-111111111122', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 940.00, freight_cost: 15.00, discount_type: '%', discount_value: 5.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111231', product_id: 'c1111111-1111-1111-1111-111111111123', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 720.00, freight_cost: 12.00, discount_type: '%', discount_value: 4.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111211', product_id: 'c1111111-1111-1111-1111-111111111121', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 1050.00, discount_type: '%', discount_value: 6.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111221', product_id: 'c1111111-1111-1111-1111-111111111122', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 940.00, discount_type: '%', discount_value: 5.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111231', product_id: 'c1111111-1111-1111-1111-111111111123', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 720.00, discount_type: '%', discount_value: 4.00, is_primary: true },
 
     // Accessories
-    { id: 'd1111111-1111-1111-1111-111111111311', product_id: 'c1111111-1111-1111-1111-111111111131', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 32.00, freight_cost: 5.00, discount_type: '%', discount_value: 8.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111321', product_id: 'c1111111-1111-1111-1111-111111111132', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 52.00, freight_cost: 5.00, discount_type: 'KR', discount_value: 3.00, is_primary: true },
-    { id: 'd1111111-1111-1111-1111-111111111331', product_id: 'c1111111-1111-1111-1111-111111111133', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 27.00, freight_cost: 3.00, discount_type: 'KR', discount_value: 2.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111311', product_id: 'c1111111-1111-1111-1111-111111111131', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 32.00, discount_type: '%', discount_value: 8.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111321', product_id: 'c1111111-1111-1111-1111-111111111132', supplier_id: 'b1111111-1111-1111-1111-111111111111', base_price: 52.00, discount_type: 'KR', discount_value: 3.00, is_primary: true },
+    { id: 'd1111111-1111-1111-1111-111111111331', product_id: 'c1111111-1111-1111-1111-111111111133', supplier_id: 'b6666666-6666-6666-6666-666666666666', base_price: 27.00, discount_type: 'KR', discount_value: 2.00, is_primary: true },
 
     // Continue with more suppliers...
-    { id: 'd2222222-2222-2222-2222-222222222211', product_id: 'c2222222-2222-2222-2222-222222222221', supplier_id: 'b2222222-2222-2222-2222-222222222222', base_price: 310.00, freight_cost: 10.00, discount_type: '%', discount_value: 3.00, is_primary: true },
-    { id: 'd3333333-3333-3333-3333-333333333311', product_id: 'c3333333-3333-3333-3333-333333333331', supplier_id: 'b3333333-3333-3333-3333-333333333333', base_price: 420.00, freight_cost: 45.00, discount_type: '%', discount_value: 8.00, is_primary: true },
-    { id: 'd4444444-4444-4444-4444-444444444411', product_id: 'c4444444-4444-4444-4444-444444444441', supplier_id: 'b4444444-4444-4444-4444-444444444444', base_price: 950.00, freight_cost: 50.00, discount_type: '%', discount_value: 10.00, is_primary: true },
-    { id: 'd5555555-5555-5555-5555-555555555511', product_id: 'c5555555-5555-5555-5555-555555555551', supplier_id: 'b5555555-5555-5555-5555-555555555555', base_price: 26.00, freight_cost: 8.00, discount_type: '%', discount_value: 5.00, is_primary: true },
+    { id: 'd2222222-2222-2222-2222-222222222211', product_id: 'c2222222-2222-2222-2222-222222222221', supplier_id: 'b2222222-2222-2222-2222-222222222222', base_price: 310.00, discount_type: '%', discount_value: 3.00, is_primary: true },
+    { id: 'd3333333-3333-3333-3333-333333333311', product_id: 'c3333333-3333-3333-3333-333333333331', supplier_id: 'b3333333-3333-3333-3333-333333333333', base_price: 420.00, discount_type: '%', discount_value: 8.00, is_primary: true },
+    { id: 'd4444444-4444-4444-4444-444444444411', product_id: 'c4444444-4444-4444-4444-444444444441', supplier_id: 'b4444444-4444-4444-4444-444444444444', base_price: 950.00, discount_type: '%', discount_value: 10.00, is_primary: true },
+    { id: 'd5555555-5555-5555-5555-555555555511', product_id: 'c5555555-5555-5555-5555-555555555551', supplier_id: 'b5555555-5555-5555-5555-555555555555', base_price: 26.00, discount_type: '%', discount_value: 5.00, is_primary: true },
   ];
 
   for (const ps of productSuppliers) {
@@ -271,7 +271,9 @@ async function main() {
         description: 'Standard import tax for international goods',
         cost_type: '%',
         cost_value: 15.00,
-        scope_type: 'global',
+        type: 'product',
+        sort_order: 0,
+        source: 'final_price',
         is_active: true,
       },
     }),
@@ -282,7 +284,9 @@ async function main() {
         description: 'Additional cost for express shipping',
         cost_type: 'KR',
         cost_value: 50.00,
-        scope_type: 'local',
+        type: 'supplier',
+        sort_order: 1,
+        source: 'calculation_price',
         is_active: true,
       },
     }),
@@ -293,7 +297,9 @@ async function main() {
         description: 'Quality inspection fee for electronics',
         cost_type: '%',
         cost_value: 2.50,
-        scope_type: 'local',
+        type: 'product',
+        sort_order: 2,
+        source: 'final_price',
         is_active: true,
       },
     }),

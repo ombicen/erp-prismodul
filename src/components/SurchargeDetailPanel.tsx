@@ -187,40 +187,6 @@ export function SurchargeDetailPanel({ surchargeId, surchargeName }: SurchargeDe
 
   const columns = useMemo<GridColumn[]>(() => [
     {
-      field: 'product_type',
-      headerName: 'Typ',
-      width: 120,
-      editable: false,
-      valueGetter: (row: SurchargeProduct) => row.product_type || 'single',
-      cellRenderer: (value: string) => {
-        const typeLabels = {
-          single: 'Produkt',
-          product_group: 'Varugrupp',
-          department: 'Avdelning',
-        };
-        const label = typeLabels[value as keyof typeof typeLabels] || 'Produkt';
-        const colors = {
-          single: 'bg-blue-100 text-blue-700',
-          product_group: 'bg-green-100 text-green-700',
-          department: 'bg-purple-100 text-purple-700',
-        };
-        const color = colors[value as keyof typeof colors] || 'bg-slate-100 text-slate-700';
-        return (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
-            {label}
-          </span>
-        );
-      },
-      filterTextGetter: (value: string) => {
-        const typeLabels = {
-          single: 'Produkt',
-          product_group: 'Varugrupp',
-          department: 'Avdelning',
-        };
-        return typeLabels[value as keyof typeof typeLabels] || 'Produkt';
-      },
-    },
-    {
       field: 'code',
       headerName: 'Produktkod',
       width: 140,
@@ -245,18 +211,6 @@ export function SurchargeDetailPanel({ surchargeId, surchargeName }: SurchargeDe
       },
     },
     {
-      field: 'product_group',
-      headerName: 'Varugrupp',
-      width: 150,
-      editable: false,
-      valueGetter: (row: SurchargeProduct) => {
-        if (row.product_type === 'product_group') {
-          return row.product_group_name || '';
-        }
-        return row.product?.product_group?.name || '';
-      },
-    },
-    {
       field: 'department',
       headerName: 'Avdelning',
       width: 150,
@@ -269,21 +223,15 @@ export function SurchargeDetailPanel({ surchargeId, surchargeName }: SurchargeDe
       },
     },
     {
-      field: 'purchase_price',
-      headerName: 'Inköpspris',
-      width: 120,
-      type: 'number',
+      field: 'product_group',
+      headerName: 'Varugrupp',
+      width: 150,
       editable: false,
       valueGetter: (row: SurchargeProduct) => {
-        // Groups/departments don't have a single purchase price
-        if (row.product_type && row.product_type !== 'single') {
-          return '-';
+        if (row.product_type === 'product_group') {
+          return row.product_group_name || '';
         }
-        return row.product?.purchase_price || 0;
-      },
-      valueFormatter: (value: any) => {
-        if (value === '-') return '-';
-        return `${Number(value).toFixed(2)} kr`;
+        return row.product?.product_group?.name || '';
       },
     },
     {
@@ -309,18 +257,16 @@ export function SurchargeDetailPanel({ surchargeId, surchargeName }: SurchargeDe
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Header */}
-      <div className="p-4 border-b border-slate-200">
-        <h2 className="text-lg font-semibold text-slate-900">{surchargeName}</h2>
-        <p className="text-sm text-slate-600 mt-1">
-          {surchargeProducts.length} produkter
-        </p>
-      </div>
-
-      {/* Toolbar */}
-      <div className="p-4 border-b border-slate-200">
+      <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">{surchargeName}</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            {surchargeProducts.length} produkter
+          </p>
+        </div>
         <button
           onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
           Lägg till produkt
@@ -328,7 +274,7 @@ export function SurchargeDetailPanel({ surchargeId, surchargeName }: SurchargeDe
       </div>
 
       {/* Products Grid */}
-      <div className="flex-1">
+      <div className="flex-1 overflow-hidden p-0">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-slate-600">Laddar produkter...</p>

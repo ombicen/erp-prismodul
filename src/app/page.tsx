@@ -23,8 +23,8 @@ export default function Home() {
 
   const navigation = [
     { id: 'products' as View, label: 'Produkter', icon: Package },
-    { id: 'contracts' as View, label: 'Avtal', icon: FileText },
     { id: 'customer-groups' as View, label: 'Kundprisgrupper', icon: Users },
+    { id: 'contracts' as View, label: 'Avtal', icon: FileText },
     { id: 'campaigns' as View, label: 'Kampanjer', icon: Megaphone },
     { id: 'surcharges' as View, label: 'Påslag', icon: DollarSign },
   ];

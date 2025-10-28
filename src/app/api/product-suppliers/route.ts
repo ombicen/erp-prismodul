@@ -19,7 +19,7 @@ export async function GET(request: Request) {
       },
       orderBy: [
         { is_primary: 'desc' },
-        { created_at: 'asc' },
+        { supplier: { name: 'asc' } },
       ],
     });
 
@@ -28,7 +28,6 @@ export async function GET(request: Request) {
       supplier_id: ps.supplier_id,
       supplier_name: ps.supplier.name,
       base_price: ps.base_price.toNumber(),
-      freight_cost: ps.freight_cost.toNumber(),
       discount_type: ps.discount_type,
       discount_value: ps.discount_value.toNumber(),
       is_primary: ps.is_primary,
@@ -49,7 +48,6 @@ export async function POST(request: Request) {
       product_id,
       supplier_id,
       base_price,
-      freight_cost = 0,
       discount_type = '%',
       discount_value = 0,
     } = body;
@@ -59,7 +57,6 @@ export async function POST(request: Request) {
     }
 
     const numericBasePrice = Number(base_price ?? 0);
-    const numericFreightCost = Number(freight_cost ?? 0);
     const numericDiscountValue = Number(discount_value ?? 0);
 
     const created = await prisma.productSupplier.create({
@@ -67,7 +64,6 @@ export async function POST(request: Request) {
         product_id,
         supplier_id,
         base_price: numericBasePrice,
-        freight_cost: numericFreightCost,
         discount_type: discount_type === 'KR' ? 'KR' : '%',
         discount_value: numericDiscountValue,
       },
@@ -81,7 +77,6 @@ export async function POST(request: Request) {
       supplier_id: created.supplier_id,
       supplier_name: created.supplier.name,
       base_price: created.base_price.toNumber(),
-      freight_cost: created.freight_cost.toNumber(),
       discount_type: created.discount_type,
       discount_value: created.discount_value.toNumber(),
       is_primary: created.is_primary,
@@ -110,12 +105,31 @@ export async function PATCH(request: Request) {
     return NextResponse.json({
       ...updated,
       base_price: updated.base_price.toNumber(),
-      freight_cost: updated.freight_cost.toNumber(),
       discount_value: updated.discount_value.toNumber(),
       created_at: updated.created_at.toISOString(),
     });
   } catch (error) {
     console.error('Error updating product supplier:', error);
     return NextResponse.json({ error: 'Failed to update product supplier' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json();
+    const { id } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    }
+
+    await prisma.productSupplier.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting product supplier:', error);
+    return NextResponse.json({ error: 'Failed to delete product supplier' }, { status: 500 });
   }
 }

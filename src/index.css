@@ -13,6 +13,11 @@
   max-width: none !important;
 }
 
+/* ReactGrid font size - 14px for all cells */
+.reactgrid .rg-cell {
+  font-size: 14px !important;
+}
+
 /* Make ReactGrid rows clickable */
 .reactgrid .rg-row:not(.rg-header-row):not([data-row-id="filter"]) {
   cursor: pointer;

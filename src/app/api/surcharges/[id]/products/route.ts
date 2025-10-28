@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export async function GET(
@@ -12,12 +12,11 @@ export async function GET(
   { params }: RouteParams
 ) {
   try {
-    const surchargeId = params.id;
+    const resolvedParams = await params;
+    const surchargeId = resolvedParams.id;
 
     const productSurcharges = await prisma.productSurcharge.findMany({
-      where: {
-        surcharge_id: surchargeId,
-      },
+      where: { surcharge_id: surchargeId },
       include: {
         product: {
           include: {
@@ -28,9 +27,6 @@ export async function GET(
             },
           },
         },
-      },
-      orderBy: {
-        created_at: 'desc',
       },
     });
 
@@ -44,7 +40,7 @@ export async function GET(
         id: ps.product.id,
         code: ps.product.code,
         name: ps.product.name,
-        purchase_price: ps.product.purchase_price,
+        purchase_price: ps.product.purchase_price.toNumber(),
         product_group: {
           name: ps.product.product_group.name,
           department: {
@@ -66,30 +62,35 @@ export async function POST(
   { params }: RouteParams
 ) {
   try {
-    const surchargeId = params.id;
+    const resolvedParams = await params;
+    const surchargeId = resolvedParams.id;
     const { productId } = await request.json();
 
-    // Check if assignment already exists
+    if (!productId) {
+      return NextResponse.json({ error: 'productId is required' }, { status: 400 });
+    }
+
+    // Check if relationship already exists
     const existing = await prisma.productSurcharge.findUnique({
       where: {
-        surcharge_id_product_id: {
-          surcharge_id: surchargeId,
+        product_id_surcharge_id: {
           product_id: productId,
+          surcharge_id: surchargeId,
         },
       },
     });
 
     if (existing) {
       return NextResponse.json(
-        { error: 'Product already assigned to this surcharge' },
-        { status: 400 }
+        { error: 'Product is already linked to this surcharge' },
+        { status: 409 }
       );
     }
 
     const productSurcharge = await prisma.productSurcharge.create({
       data: {
-        surcharge_id: surchargeId,
         product_id: productId,
+        surcharge_id: surchargeId,
         is_active: true,
       },
       include: {
@@ -115,7 +116,7 @@ export async function POST(
         id: productSurcharge.product.id,
         code: productSurcharge.product.code,
         name: productSurcharge.product.name,
-        purchase_price: productSurcharge.product.purchase_price,
+        purchase_price: productSurcharge.product.purchase_price.toNumber(),
         product_group: {
           name: productSurcharge.product.product_group.name,
           department: {

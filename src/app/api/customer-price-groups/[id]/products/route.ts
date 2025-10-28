@@ -46,7 +46,7 @@ export async function GET(
           productType === 'single' ? (rule.product?.name || '') :
           productType === 'product_group' ? (rule.product_group?.name || '') :
           productType === 'department' ? (rule.department?.name || '') :
-          'Hela sortimentet',
+          'Alla produkter',
         product_type: productType,
         product_group_name: productType === 'product_group' ? rule.product_group?.name : undefined,
         department_name: productType === 'department' ? rule.department?.name : undefined,

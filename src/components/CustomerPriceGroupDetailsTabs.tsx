@@ -280,7 +280,7 @@ export function CustomerPriceGroupDetailsTabs({
           single: 'Produkt',
           product_group: 'Varugrupp',
           department: 'Avdelning',
-          all: 'Hela sortimentet',
+          all: 'Alla produkter',
         };
         const label = typeLabels[value as keyof typeof typeLabels] || value;
         const colors = {
@@ -301,7 +301,7 @@ export function CustomerPriceGroupDetailsTabs({
           single: 'Produkt',
           product_group: 'Varugrupp',
           department: 'Avdelning',
-          all: 'Hela sortimentet',
+          all: 'Alla produkter',
         };
         return typeLabels[value as keyof typeof typeLabels] || 'Produkt';
       },
@@ -435,7 +435,7 @@ export function CustomerPriceGroupDetailsTabs({
     setSearchTerm('');
   };
 
-  const handleAddEntireAssortment = async () => {
+  const handleAddAllProducts = async () => {
     try {
       const payload = {
         product_type: 'all',
@@ -448,7 +448,7 @@ export function CustomerPriceGroupDetailsTabs({
       await api.customerPriceGroups.addProduct(priceGroupId, payload);
       await loadProducts();
     } catch (error) {
-      console.error('Error adding entire assortment:', error);
+      console.error('Error adding all products rule:', error);
     }
 
     setIsModalOpen(false);
@@ -581,13 +581,13 @@ export function CustomerPriceGroupDetailsTabs({
                     </button>
                   </div>
 
-                  {/* Add entire assortment button */}
+                  {/* Add all products button */}
                   <button
-                    onClick={handleAddEntireAssortment}
+                    onClick={handleAddAllProducts}
                     className="w-full mb-4 px-4 py-3 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
-                    Lägg till hela sortimentet
+                    Lägg till alla produkter
                   </button>
                 </>
               )}

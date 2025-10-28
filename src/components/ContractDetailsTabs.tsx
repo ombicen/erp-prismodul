@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SpreadsheetGrid, GridColumn } from './SpreadsheetGrid';
 import { Plus, X } from 'lucide-react';
 
@@ -150,6 +150,18 @@ export function ContractDetailsTabs({
     { id: 'd4', code: 'AVD-004', name: 'Administration' },
   ];
 
+  // Dropdown options for change type
+  const changeTypeOptions = useMemo(
+    () => [
+      { label: '% Påslag', value: 'percentage_surcharge' },
+      { label: 'kr Påslag', value: 'kr_surcharge' },
+      { label: '% Rabatt', value: 'discount_percentage' },
+      { label: 'kr Rabatt', value: 'discount_kr' },
+      { label: 'Fast pris', value: 'fixed_price' },
+    ],
+    [],
+  );
+
   const customerColumns: GridColumn[] = [
     {
       field: 'customer_number',
@@ -199,21 +211,6 @@ export function ContractDetailsTabs({
     const factor = Math.pow(10, decimals);
     return Math.round(value * factor) / factor;
   };
-  const changeTypeLabelMap: Record<ChangeType, string> = {
-    percentage_surcharge: 'Percentage Surcharge',
-    kr_surcharge: 'Fixed Surcharge (SEK)',
-    discount_percentage: 'Percentage Discount',
-    discount_kr: 'Fixed Discount (SEK)',
-    fixed_price: 'Fixed Price',
-  };
-
-  const changeTypeOptions = useMemo(() =>
-    (Object.keys(changeTypeLabelMap) as ChangeType[]).map(value => ({
-      value,
-      label: changeTypeLabelMap[value],
-    })),
-  []);
-
 
   const handleProductCellValueChange = (rowId: string, field: string, rawValue: any) => {
     setProducts(prev =>
@@ -222,44 +219,43 @@ export function ContractDetailsTabs({
           return product;
         }
 
+        // For non-single products, just update the field
+        if (product.product_type !== 'single') {
+          return { ...product, [field]: rawValue };
+        }
+
         const purchasePrice = toNumber(product.purchase_price, 0);
         const slutpris = toNumber(product.slutpris, 0);
-        const changeType = product.change_type;
+        let changeType = product.change_type;
         let changeValue = toNumber(product.change_value, 0);
         let marginPercentage = toNumber(product.margin_percentage, 0);
         let netPrice = toNumber(product.net_price, 0);
 
         if (field === 'change_type') {
-          const newChangeType = rawValue as ChangeType;
+          // When change_type changes, recalculate net_price with new type
+          changeType = rawValue as ChangeType;
 
-          if (product.product_type !== 'single') {
-            return { ...product, change_type: newChangeType };
-          }
-
-          let netPrice = 0;
-          if (newChangeType === 'percentage_surcharge') {
+          if (changeType === 'percentage_surcharge') {
             const surcharge = purchasePrice * (changeValue / 100);
             netPrice = slutpris + surcharge;
-          } else if (newChangeType === 'kr_surcharge') {
+          } else if (changeType === 'kr_surcharge') {
             netPrice = slutpris + changeValue;
-          } else if (newChangeType === 'discount_percentage') {
+          } else if (changeType === 'discount_percentage') {
             netPrice = slutpris * (1 - changeValue / 100);
-          } else if (newChangeType === 'discount_kr') {
+          } else if (changeType === 'discount_kr') {
             netPrice = slutpris - changeValue;
-          } else if (newChangeType === 'fixed_price') {
+          } else if (changeType === 'fixed_price') {
             netPrice = changeValue;
           }
 
-          const marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
+          marginPercentage = netPrice > 0 ? ((netPrice - slutpris) / netPrice) * 100 : 0;
 
           return {
             ...product,
-            change_type: newChangeType,
+            change_type: changeType,
             net_price: roundTo(netPrice, 2),
             margin_percentage: roundTo(marginPercentage, 1),
           };
-        } else if (product.product_type !== 'single') {
-          return { ...product, [field]: rawValue };
         } else if (field === 'change_value') {
           changeValue = toNumber(rawValue, changeValue);
           // Recalculate net_price based on change_type
@@ -415,14 +411,21 @@ export function ContractDetailsTabs({
     },
     {
       field: 'change_type',
-      headerName: 'Change Type',
-      width: 180,
+      headerName: 'Förändring',
+      width: 150,
       editable: true,
       cellType: 'customDropdown',
-      dropdownPlaceholder: 'Select change type',
       dropdownOptions: () => changeTypeOptions,
-      filterTextGetter: (value: any) => changeTypeLabelMap[value as ChangeType] ?? 'Change Type',
-    },
+      filterTextGetter: (value: any) => {
+        const labels: Record<ChangeType, string> = {
+          percentage_surcharge: '% Påslag',
+          kr_surcharge: 'kr Påslag',
+          discount_percentage: '% Rabatt',
+          discount_kr: 'kr Rabatt',
+          fixed_price: 'Fast pris',
+        };
+        return labels[value as ChangeType] || value;
+      },
     },
     {
       field: 'change_value',
@@ -702,14 +705,14 @@ export function ContractDetailsTabs({
                   {/* Add entire assortment button */}
                   <button
                     onClick={() => {
-                      // Add entire assortment as a single row
+                      // Add entire assortment as a single row with percentage discount as default
                       const newAssortmentProduct: ContractProduct = {
                         id: `assortment-${Date.now()}`,
                         product_code: 'SORT-ALL',
                         product_name: 'Hela sortimentet',
                         product_type: 'department', // Using department type for entire assortment
                         department_name: 'Hela sortimentet',
-                        change_type: 'discount_percentage',
+                        change_type: 'discount_percentage', // Default to percentage discount for contracts
                         change_value: 0,
                         quantity: 1,
                         valid_from: new Date().toISOString().split('T')[0],

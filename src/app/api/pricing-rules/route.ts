@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     const serialized = rules.map(r => ({
       ...r,
-      discount_value: r.discount_value.toNumber(),
+      discount_value: r.discount_value?.toNumber() || 0,
       created_at: r.created_at.toISOString(),
     }));
 
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     const serialized = {
       ...rule,
-      discount_value: rule.discount_value.toNumber(),
+      discount_value: rule.discount_value?.toNumber() || 0,
       created_at: rule.created_at.toISOString(),
     };
 
@@ -63,7 +63,7 @@ export async function PATCH(request: NextRequest) {
 
     const serialized = {
       ...updated,
-      discount_value: updated.discount_value.toNumber(),
+      discount_value: updated.discount_value?.toNumber() || 0,
       created_at: updated.created_at.toISOString(),
     };
 

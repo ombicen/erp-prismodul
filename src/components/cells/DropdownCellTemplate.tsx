@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import {
   Cell,
   CellTemplate,
@@ -13,6 +12,7 @@ import {
   isNavigationKey,
   keyCodes,
 } from '@silevis/reactgrid';
+import { DROPDOWN_CELL_CONFIG } from '../../lib/reactgrid-constants';
 
 export interface DropdownOption {
   label: string;
@@ -40,6 +40,7 @@ export class DropdownCellTemplate implements CellTemplate<CustomDropdownCell> {
     const text = this.getDisplayText(selectedValue, options);
 
     const cell: Compatible<CustomDropdownCell> = {
+      ...DROPDOWN_CELL_CONFIG,
       type: 'customDropdown',
       selectedValue,
       options: Array.isArray(options) ? options : [],
@@ -120,23 +121,8 @@ const DropdownInput: React.FC<DropdownInputProps> = ({ cell, onCellChanged }) =>
     const index = cell.options.findIndex(opt => opt.value === cell.selectedValue);
     return index >= 0 ? index : 0;
   });
-  const [menuPosition, setMenuPosition] = React.useState<{ top: number; left: number; width: number } | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
-
-  // Calculate menu position when opening
-  React.useEffect(() => {
-    if (cell.isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setMenuPosition({
-        top: rect.bottom,
-        left: rect.left,
-        width: rect.width,
-      });
-    } else {
-      setMenuPosition(null);
-    }
-  }, [cell.isOpen]);
 
   // Close on click outside - only when open
   React.useEffect(() => {
@@ -206,26 +192,17 @@ const DropdownInput: React.FC<DropdownInputProps> = ({ cell, onCellChanged }) =>
     <div
       ref={containerRef}
       onPointerDown={(e) => {
-        if (!cell.isDisabled && !cell.isOpen) {
-          e.stopPropagation();
-          onCellChanged({ ...cell, isOpen: true }, true);
+        e.stopPropagation(); // Always stop propagation like in the documentation
+        if (!cell.isDisabled) {
+          onCellChanged({ ...cell, isOpen: !cell.isOpen }, true); // Toggle dropdown state
         }
       }}
       onKeyDown={handleKeyDown}
       tabIndex={0}
+      className="w-full h-full flex items-center justify-between relative bg-transparent text-[13px] outline-none border-none px-2"
       style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'relative',
-        backgroundColor: 'white',
-        padding: '0 8px',
-        fontSize: '13px',
         color: cell.isDisabled ? '#94a3b8' : '#1e293b',
         cursor: cell.isDisabled ? 'not-allowed' : 'pointer',
-        outline: cell.isOpen ? '2px solid #3b82f6' : 'none',
       }}
     >
       <span>{cell.text || <span style={{ color: '#94a3b8' }}>{cell.placeholder || 'Select...'}</span>}</span>
@@ -245,21 +222,22 @@ const DropdownInput: React.FC<DropdownInputProps> = ({ cell, onCellChanged }) =>
         />
       </svg>
 
-      {/* Dropdown list - render in portal when open */}
-      {cell.isOpen && menuPosition && typeof document !== 'undefined' && createPortal(
+      {/* Dropdown list - render inside cell with absolute positioning */}
+      {cell.isOpen && (
         <div
           ref={listRef}
           className="rg-dropdown-menu"
           onPointerDown={(e) => e.stopPropagation()}
           style={{
             position: 'absolute',
-            top: `${menuPosition.top}px`,
-            left: `${menuPosition.left}px`,
-            width: `${menuPosition.width}px`,
+            top: '100%',
+            left: '0',
+            right: '0',
             maxHeight: '200px',
             overflowY: 'auto',
             backgroundColor: 'white',
-            border: '2px solid #3b82f6',
+            border: '1px solid #e5e7eb',
+            borderRadius: '4px',
             boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
             zIndex: 10000,
           }}
@@ -286,8 +264,7 @@ const DropdownInput: React.FC<DropdownInputProps> = ({ cell, onCellChanged }) =>
               {option.label}
             </div>
           ))}
-        </div>,
-        document.body
+        </div>
       )}
     </div>
   );

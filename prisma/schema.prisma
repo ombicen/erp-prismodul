@@ -41,12 +41,13 @@ model ProductGroup {
 }
 
 model Supplier {
-  id                String            @id @default(uuid())
-  name              String
-  code              String            @unique
-  created_at        DateTime          @default(now())
+  id                  String              @id @default(uuid())
+  name                String
+  code                String              @unique
+  created_at          DateTime            @default(now())
 
-  product_suppliers ProductSupplier[]
+  product_suppliers   ProductSupplier[]
+  supplier_surcharges SupplierSurcharge[]
 
   @@map("suppliers")
 }
@@ -68,8 +69,8 @@ model Product {
   suppliers             ProductSupplier[]
   contract_products     ContractProduct[]
   primary_supplier      ProductSupplier?    @relation("PrimarySupplier", fields: [primary_supplier_id], references: [id])
-  product_surcharges    ProductSurcharge[]
   pricing_rules         PricingRule[]
+  product_surcharges    ProductSurcharge[]
 
   @@map("products")
 }
@@ -79,7 +80,6 @@ model ProductSupplier {
   product_id        String
   supplier_id       String
   base_price        Decimal   @default(0) @db.Decimal(10, 2)  // Baspris
-  freight_cost      Decimal   @default(0) @db.Decimal(10, 2)  // Frakt
   discount_type     String    @default("%")       // "%" or "KR"
   discount_value    Decimal   @default(0) @db.Decimal(10, 2)  // Rabattmängd
   is_primary        Boolean   @default(false)
@@ -235,30 +235,56 @@ model PricingRule {
 }
 
 model Surcharge {
-  id          String            @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
   description String?
-  cost_type   String            @default("%")  // "%" or "KR"
-  cost_value  Decimal           @db.Decimal(10, 2)
-  scope_type  String            @default("local")  // "global" or "local"
-  is_active   Boolean           @default(true)
-  created_at  DateTime          @default(now())
+  cost_type   String   @default("%")  // "%" or "KR"
+  cost_value  Decimal  @db.Decimal(10, 2)
 
-  product_surcharges ProductSurcharge[]
+  // Type of surcharge: applies to products or suppliers
+  type        String   @default("product")  // "product" or "supplier"
+
+  // Ordering and source fields
+  sort_order  Int      @default(0)
+  source      String   @default("final_price")  // "final_price" or "calculation_price"
+
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+
+  // Many-to-many relationships
+  product_surcharges  ProductSurcharge[]
+  supplier_surcharges SupplierSurcharge[]
 
   @@map("surcharges")
 }
 
+// Junction table for Product ↔ Surcharge many-to-many
 model ProductSurcharge {
-  id           String    @id @default(uuid())
-  surcharge_id String
+  id           String   @id @default(uuid())
   product_id   String
-  is_active    Boolean   @default(true)
-  created_at   DateTime  @default(now())
+  surcharge_id String
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
 
-  surcharge    Surcharge @relation(fields: [surcharge_id], references: [id], onDelete: Cascade)
   product      Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  surcharge    Surcharge @relation(fields: [surcharge_id], references: [id], onDelete: Cascade)
 
-  @@unique([surcharge_id, product_id])
+  @@unique([product_id, surcharge_id])
   @@map("product_surcharges")
 }
+
+// Junction table for Supplier ↔ Surcharge many-to-many
+model SupplierSurcharge {
+  id           String   @id @default(uuid())
+  supplier_id  String
+  surcharge_id String
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+
+  supplier     Supplier  @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  surcharge    Surcharge @relation(fields: [surcharge_id], references: [id], onDelete: Cascade)
+
+  @@unique([supplier_id, surcharge_id])
+  @@map("supplier_surcharges")
+}
+
